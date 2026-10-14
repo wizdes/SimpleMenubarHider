@@ -168,16 +168,15 @@ step_a() {
     log "MISSING $SMH_APP (need a Debug build installed)"
     problems=$((problems + 1))
   else
-    local plist="$SMH_APP/Contents/Info.plist" exe="" bid=""
+    local plist="$SMH_APP/Contents/Info.plist" bid=""
     if [ -f "$plist" ]; then
-      exe="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$plist" 2>/dev/null || true)"
       bid="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist" 2>/dev/null || true)"
     fi
     if [ "$bid" != "$SMH_BID" ]; then
       log "WRONG bundle id in $SMH_APP: '$bid' (want $SMH_BID)"
       problems=$((problems + 1))
     fi
-    if [ -z "$exe" ] || ! grep -q "dev.yili.smh.debug.command" "$SMH_APP/Contents/MacOS/$exe" 2>/dev/null; then
+    if [ -z "$(find "$SMH_APP/Contents/MacOS/" -type f -exec grep -q "dev.yili.smh.debug.command" {} \; -print -quit 2>/dev/null)" ]; then
       log "NOT-A-DEBUG-BUILD: $SMH_APP has no debug channel (want a Debug build)"
       problems=$((problems + 1))
     fi
