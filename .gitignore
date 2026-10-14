@@ -4,3 +4,4 @@ DerivedData/
 worktrees/
 *.xcodeproj/
 .DS_Store
+spike/results/
