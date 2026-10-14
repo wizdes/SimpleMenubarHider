@@ -14,7 +14,7 @@ End-to-end tests drive SMH through macOS distributed notifications. The channel 
 | cmd | arg | What SMH does |
 | --- | --- | --- |
 | `setHidden` | comma-separated bundle ids, or empty | Replaces the hidden set, saves it, sends `hiddenSetChanged`. |
-| `setRevealSeconds` | number of seconds | Sets the reveal delay (clamped to 1...120 in Debug builds). |
+| `setRevealSeconds` | number of seconds | Sets the reveal delay (clamped to 3...120, the same as Settings). |
 | `reveal` | none | Same as clicking SMH's icon. |
 | `pause` / `resume` | none | Sets `paused` and sends `pauseToggled`. |
 | `state` | none | Only replies. |
