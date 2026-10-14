@@ -56,7 +56,7 @@ I confirmed `MenuBarClientCore.framework` and `MenuBarAgent` exist on this Mac. 
 ```
 
 Parts:
-1. **SMHCore** (Swift package, no AppKit). Holds the hidden set, works out the allowed list, and runs the state machine: `expanded`, `collapsed`, `revealing` (timer running), `liftedForClock`, `unavailable`. All logic lives here so unit tests cover it.
+1. **SMHCore** (Swift package, no AppKit). Holds the hidden set, works out the allowed list, and runs the state machine: `expanded`, `collapsed`, `revealing` (timer running), `unavailable`. All logic lives here so unit tests cover it.
 2. **MenuBarShim** (Objective-C). Loads `MenuBarClientCore` with `dlopen` and finds the classes at run time. It exposes `isAvailable`, `apply(allowedBundleIDs, systemItems)` and `release()`. Any missing class, missing selector or thrown exception returns an error. It never crashes and never hides on error.
 3. **Scanner.** Lists running apps with `NSWorkspace`. Uses Accessibility (`AXExtrasMenuBar`) to find which apps own an icon. Finds the clock's position for the Notification Center workaround.
 4. **App shell.** SMH's own status item: click to reveal, right-click for a small menu (Settings, Pause hiding, Quit). Settings window with one list of apps and a checkbox each. Launch at login through `SMAppService`. Sparkle for updates.
@@ -67,6 +67,16 @@ Safety rules:
 - Quitting or crashing must bring every icon back. Milestone 0 proves this.
 - SMH refuses to hide when it is not running from `/Applications` (macOS will not draw its icon there).
 - The app is signed with the Developer ID every build, so the Accessibility grant survives rebuilds. Ad-hoc signing resets that grant each time.
+
+## M0 results (2026-10-14) and plan changes
+
+M0 passed on macOS 27.0.1 (26A434): 20/20 hide and restore cycles, kill -9 recovery in 552 ms. Details are in the spike scripts and `spike/results/` (not committed).
+1. An app launched while hiding is on stays hidden, because it is not on the allow list. SMH reapplies the list on every app launch, turning on the new assertion before dropping the old one (two assertions combine, so nothing flashes).
+2. With system items 0...255 allowed, clicks on the clock, Wi-Fi and Control Center still worked (user test). There is no click bridge and no `liftedForClock` state in version 1. M4 test 17 keeps checking it.
+3. `invalidate` without quitting restores icons at once. No helper process.
+4. Restarting `MenuBarAgent` does not drop the assertion.
+5. End-to-end tests read a screenshot of the menu bar for a solid magenta fixture icon. MenuBarAgent's log count is not usable.
+6. Any assertion hides the Focus icon. The README must say so.
 
 ## Not in this version
 
