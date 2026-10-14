@@ -336,9 +336,15 @@ static int visible(int argc, const char **argv) {
         size_t width = CGImageGetWidth(image), height = CGImageGetHeight(image);
         size_t stride = width * 4;
         unsigned char *pixels = calloc(height, stride);
-        CGColorSpaceRef colorSpace = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+        CGColorSpaceRef imageSpace = CGImageGetColorSpace(image);
+        CGColorSpaceRef ownedSpace = NULL;
+        CGColorSpaceRef colorSpace = imageSpace;
+        if (!colorSpace || CGColorSpaceGetModel(colorSpace) != kCGColorSpaceModelRGB) {
+            ownedSpace = CGColorSpaceCreateDeviceRGB();
+            colorSpace = ownedSpace;
+        }
         CGContextRef context = pixels ? CGBitmapContextCreate(pixels, width, height, 8, stride, colorSpace, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big) : NULL;
-        CGColorSpaceRelease(colorSpace);
+        if (ownedSpace) CGColorSpaceRelease(ownedSpace);
         if (!context) {
             free(pixels); CGImageRelease(image);
             fprintf(stderr, "capture image conversion failed\n");

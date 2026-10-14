@@ -19,4 +19,5 @@ else
     echo "FAIL visible exit $visible_status: $visible_output"
     exit 1
 fi
+python3 "$here/tests/test_visible_color.py"
 printf 'PASS build, scripts, classes, selectors, and visible command\n'
