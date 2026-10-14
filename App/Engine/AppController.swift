@@ -13,6 +13,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     private(set) var state: BarState = .expanded
     private var revealTimer: Timer?
     private var appChangeTimer: Timer?
+    private var runningAppsObservation: NSKeyValueObservation?
     private var signalSources: [DispatchSourceSignal] = []
     #if DEBUG
     private var debugChannel: DebugChannel?
@@ -31,9 +32,14 @@ final class AppController: NSObject, NSApplicationDelegate {
             else { self?.receive(event) }
         }
         status.onQuit = { [weak self] in self?.quit() }
+        // Launch and terminate notifications skip agent (LSUIElement) apps, which most menu bar apps are.
+        // Observing runningApplications sees every app.
+        runningAppsObservation = NSWorkspace.shared.observe(\.runningApplications, options: [.new, .old]) { [weak self] _, change in
+            let appChange = RunningAppsChange(old: (change.oldValue ?? []).map(\.bundleIdentifier),
+                                              new: (change.newValue ?? []).map(\.bundleIdentifier))
+            Task { @MainActor in self?.runningAppsChanged(appChange) }
+        }
         let center = NSWorkspace.shared.notificationCenter
-        center.addObserver(self, selector: #selector(workspaceAppChanged), name: NSWorkspace.didLaunchApplicationNotification, object: nil)
-        center.addObserver(self, selector: #selector(workspaceAppChanged), name: NSWorkspace.didTerminateApplicationNotification, object: nil)
         center.addObserver(self, selector: #selector(workspaceChanged), name: NSWorkspace.didWakeNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(workspaceChanged), name: NSApplication.didChangeScreenParametersNotification, object: nil)
         installSignalHandlers()
@@ -48,12 +54,16 @@ final class AppController: NSObject, NSApplicationDelegate {
         receive(.quitRequested)
         revealTimer?.invalidate()
         appChangeTimer?.invalidate()
+        runningAppsObservation?.invalidate()
+        runningAppsObservation = nil
         NSWorkspace.shared.notificationCenter.removeObserver(self)
         NotificationCenter.default.removeObserver(self)
         signalSources.forEach { $0.cancel() }
     }
 
-    @objc private func workspaceAppChanged(_ notification: Notification) {
+    private func runningAppsChanged(_ change: RunningAppsChange) {
+        if change.isEmpty { return }
+        logger.info("running apps changed: \(change.launched.count) launched, \(change.terminated.count) terminated")
         appChangeTimer?.invalidate()
         appChangeTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.receive(.runningAppsChanged) }
