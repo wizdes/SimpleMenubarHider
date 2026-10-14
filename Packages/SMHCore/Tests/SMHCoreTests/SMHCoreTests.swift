@@ -102,8 +102,10 @@ private let active = BarContext(revealSeconds: 10, paused: false, hiddenIsEmpty:
 }
 
 @Test func pauseTransitions() {
-    #expect(BarStateMachine.reduce(.collapsed, .pauseToggled(now: now), active) == (.expanded, [.release]))
-    #expect(BarStateMachine.reduce(.revealing(until: now), .pauseToggled(now: now), active) == (.expanded, [.cancelRevealTimer, .release]))
+    // pauseToggled carries the new paused value in the context.
+    let pausedNow = BarContext(revealSeconds: 10, paused: true, hiddenIsEmpty: false)
+    #expect(BarStateMachine.reduce(.collapsed, .pauseToggled(now: now), pausedNow) == (.expanded, [.release]))
+    #expect(BarStateMachine.reduce(.revealing(until: now), .pauseToggled(now: now), pausedNow) == (.expanded, [.cancelRevealTimer, .release]))
     #expect(BarStateMachine.reduce(.expanded, .pauseToggled(now: now), active) == (.collapsed, [.applyAllowList]))
     let empty = BarContext(revealSeconds: 10, paused: false, hiddenIsEmpty: true)
     #expect(BarStateMachine.reduce(.expanded, .pauseToggled(now: now), empty) == (.expanded, []))

@@ -13,7 +13,11 @@ public enum BarEvent: Equatable, Sendable {
     case revealClicked(now: Date), revealTimerFired(now: Date)
     case menuOpened, menuClosed(now: Date)
     case runningAppsChanged, hiddenSetChanged
-    case pauseToggled(now: Date), applyFailed(String), quitRequested
+    /// The app flips `paused` in Settings first and then sends this event,
+    /// so `BarContext.paused` already holds the new value.
+    /// Paused: the bar shows every icon. Not paused: the bar hides the set, or shows all if the set is empty.
+    case pauseToggled(now: Date)
+    case applyFailed(String), quitRequested
 }
 
 public enum BarAction: Equatable, Sendable {
@@ -51,8 +55,7 @@ public enum BarStateMachine {
             if !inApplications {
                 return (.unavailable(.notInApplications), releaseActions(for: state) + [.showWarning(.notInApplications)])
             }
-            if context.paused || context.hiddenIsEmpty { return (.expanded, []) }
-            return (.collapsed, [.applyAllowList])
+            return settle(state, context)
         }
 
         if case .unavailable = state { return (state, []) }
@@ -69,6 +72,8 @@ public enum BarStateMachine {
             }
         case .revealTimerFired(let now):
             if case .revealing(let until) = state, now >= until, until != menuHeldUntil {
+                // The icons are already shown, so there is nothing to release.
+                if context.paused || context.hiddenIsEmpty { return (.expanded, []) }
                 return (.collapsed, [.applyAllowList])
             }
             return (state, [])
@@ -85,24 +90,26 @@ public enum BarStateMachine {
             if case .collapsed = state { return (state, [.applyAllowList]) }
             return (state, [])
         case .hiddenSetChanged:
-            if case .collapsed = state {
-                if context.hiddenIsEmpty { return (.expanded, [.release]) }
-                return (state, [.applyAllowList])
+            if case .revealing = state {
+                // The icons are already shown, so only the timer needs to stop.
+                if context.paused || context.hiddenIsEmpty { return (.expanded, [.cancelRevealTimer]) }
+                return (state, [])
             }
-            return (state, [])
+            return settle(state, context)
         case .pauseToggled:
-            switch state {
-            case .collapsed: return (.expanded, [.release])
-            case .revealing: return (.expanded, [.cancelRevealTimer, .release])
-            case .expanded where !context.hiddenIsEmpty: return (.collapsed, [.applyAllowList])
-            default: return (state, [])
-            }
+            return settle(state, context)
         case .applyFailed(let message):
             let reason = Reason.applyFailed(message)
             let actions: [BarAction] = state.isRevealing ? [.cancelRevealTimer, .release, .showWarning(reason)] : [.release, .showWarning(reason)]
             return (.unavailable(reason), actions)
         case .launched, .quitRequested: return (state, [])
         }
+    }
+
+    /// Moves to the resting state the context asks for: shown when paused or nothing is hidden, hidden otherwise.
+    private static func settle(_ state: BarState, _ context: BarContext) -> (BarState, [BarAction]) {
+        if context.paused || context.hiddenIsEmpty { return (.expanded, releaseActions(for: state)) }
+        return (.collapsed, (state.isRevealing ? [.cancelRevealTimer] : []) + [.applyAllowList])
     }
 
     private static func releaseActions(for state: BarState) -> [BarAction] {
