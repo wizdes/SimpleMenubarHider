@@ -57,6 +57,20 @@ import Testing
     #expect(try JSONDecoder().decode(Settings.self, from: data).revealSeconds == 120)
 }
 
+@Test func settingsDecodeOldDataWithoutNames() throws {
+    let data = Data(#"{"hidden":["app"],"revealSeconds":10,"paused":false,"schemaVersion":1}"#.utf8)
+    let settings = try JSONDecoder().decode(Settings.self, from: data)
+    #expect(settings.hidden == ["app"])
+    #expect(settings.names.isEmpty)
+}
+
+@Test func settingsNamesRoundTrip() throws {
+    let original = Settings(hidden: ["dev.example.app"], names: ["dev.example.app": "Example App"])
+    let restored = try JSONDecoder().decode(Settings.self, from: JSONEncoder().encode(original))
+    #expect(restored == original)
+    #expect(restored.names["dev.example.app"] == "Example App")
+}
+
 private let now = Date(timeIntervalSince1970: 1_000)
 private let active = BarContext(revealSeconds: 10, paused: false, hiddenIsEmpty: false)
 

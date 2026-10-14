@@ -2,13 +2,19 @@ import AppKit
 import Dispatch
 import OSLog
 import SMHCore
+import ApplicationServices
+import ServiceManagement
 
 @MainActor
 final class AppController: NSObject, NSApplicationDelegate {
     private let logger = Logger(subsystem: "dev.yili.smh", category: "controller")
     private let store = SettingsStore(store: UserDefaultsStore(suiteName: "dev.yili.smh"))
     private let engine = HidingEngine()
-    private let status = StatusItemController()
+    private let popoverModel = PopoverModel()
+    private lazy var status = StatusItemController(model: popoverModel)
+    private let scanner = MenuBarScanner()
+    private var trustTimer: Timer?
+    private var firstLaunch = false
     private(set) var settings = Settings()
     private(set) var state: BarState = .expanded
     private var revealTimer: Timer?
@@ -22,16 +28,24 @@ final class AppController: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         switch store.load() {
         case .loaded(let value): settings = value
-        case .missing: settings = Settings()
+        case .missing: settings = Settings(); firstLaunch = true
         case .corrupt(let fallback, let reason):
             settings = fallback
             logger.error("settings corrupt: \(reason, privacy: .public)")
         }
         status.onEvent = { [weak self] event in
-            if case .pauseToggled = event { self?.togglePause() }
-            else { self?.receive(event) }
+            self?.receive(event)
         }
+        status.onOpen = { [weak self] in self?.popoverOpened() }
         status.onQuit = { [weak self] in self?.quit() }
+        popoverModel.toggleApp = { [weak self] id in self?.toggleApp(id) }
+        popoverModel.setRevealSeconds = { [weak self] seconds in self?.setRevealSeconds(seconds) }
+        popoverModel.setPaused = { [weak self] paused in self?.setPaused(paused) {} }
+        popoverModel.setLaunchAtLogin = { [weak self] enabled in self?.setLaunchAtLogin(enabled) }
+        popoverModel.openAccessibilitySettings = { [weak self] in self?.openAccessibilitySettings() }
+        popoverModel.quit = { [weak self] in self?.quit() }
+        syncPopover()
+        popoverModel.trusted = AXIsProcessTrusted()
         // Launch and terminate notifications skip agent (LSUIElement) apps, which most menu bar apps are.
         // Observing runningApplications sees every app.
         runningAppsObservation = NSWorkspace.shared.observe(\.runningApplications, options: [.new, .old]) { [weak self] _, change in
@@ -48,12 +62,18 @@ final class AppController: NSObject, NSApplicationDelegate {
         #endif
         receive(.launched(shimAvailable: SMHMenuBarShim.isAvailable(),
                           inApplications: Bundle.main.bundlePath.hasPrefix("/Applications/"), now: Date()))
+        scanApps()
+        trustTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkTrust() }
+        }
+        if firstLaunch { DispatchQueue.main.async { [weak self] in self?.status.openPopover() } }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         receive(.quitRequested)
         revealTimer?.invalidate()
         appChangeTimer?.invalidate()
+        trustTimer?.invalidate()
         runningAppsObservation?.invalidate()
         runningAppsObservation = nil
         NSWorkspace.shared.notificationCenter.removeObserver(self)
@@ -66,11 +86,17 @@ final class AppController: NSObject, NSApplicationDelegate {
         logger.info("running apps changed: \(change.launched.count) launched, \(change.terminated.count) terminated")
         appChangeTimer?.invalidate()
         appChangeTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { [weak self] _ in
-            MainActor.assumeIsolated { self?.receive(.runningAppsChanged) }
+            MainActor.assumeIsolated {
+                self?.receive(.runningAppsChanged)
+                self?.scanApps()
+            }
         }
     }
 
-    @objc private func workspaceChanged(_ notification: Notification) { receive(.runningAppsChanged) }
+    @objc private func workspaceChanged(_ notification: Notification) {
+        receive(.runningAppsChanged)
+        scanApps()
+    }
 
     private func installSignalHandlers() {
         for signalNumber in [SIGTERM, SIGINT] {
@@ -92,6 +118,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         if next != state { logger.info("state: \(String(describing: self.state), privacy: .public) -> \(String(describing: next), privacy: .public)") }
         state = next
         status.render(state: state, hiddenCount: settings.hidden.count, paused: settings.paused)
+        syncPopover()
         if actions.isEmpty { completion?(); return }
         var waitingForApply = false
         for action in actions {
@@ -131,21 +158,99 @@ final class AppController: NSObject, NSApplicationDelegate {
     func setHidden(_ hidden: Set<String>, completion: @escaping () -> Void) {
         settings.hidden = hidden
         store.save(settings)
+        syncPopover()
         receive(.hiddenSetChanged, completion: completion)
+    }
+
+    func toggleApp(_ id: String, completion: @escaping () -> Void = {}) {
+        var updated = settings.hidden
+        if updated.contains(id) { updated.remove(id) } else { updated.insert(id) }
+        setHidden(updated, completion: completion)
     }
 
     func setRevealSeconds(_ seconds: Double) {
         settings.revealSeconds = seconds
         store.save(settings)
+        syncPopover()
     }
 
     func setPaused(_ paused: Bool, completion: @escaping () -> Void) {
         settings.paused = paused
         store.save(settings)
+        syncPopover()
         receive(.pauseToggled(now: Date()), completion: completion)
     }
 
     func togglePause() { setPaused(!settings.paused) {} }
+
+    func openPopover() { status.openPopover() }
+    func closePopover() { status.closePopover() }
+
+    func scanApps(completion: (() -> Void)? = nil) {
+        popoverModel.scanning = true
+        scanner.scan { [weak self] apps in
+            guard let self else { return }
+            self.popoverModel.trusted = apps != nil
+            self.popoverModel.scanning = false
+            if let apps {
+                self.popoverModel.apps = apps
+                for app in apps where self.settings.hidden.contains(app.bundleID) {
+                    self.settings.names[app.bundleID] = app.name
+                }
+                self.store.save(self.settings)
+            }
+            self.status.updatePopoverSize()
+            completion?()
+        }
+    }
+
+    private func popoverOpened() {
+        popoverModel.trusted = AXIsProcessTrusted()
+        popoverModel.loginError = nil
+        popoverModel.launchAtLogin = SMAppService.mainApp.status == .enabled
+        scanApps()
+    }
+
+    private func checkTrust() {
+        let trusted = AXIsProcessTrusted()
+        if trusted && !popoverModel.trusted {
+            popoverModel.trusted = true
+            scanApps { [weak self] in
+                guard let self else { return }
+                self.status.closePopover()
+                self.status.openPopover()
+            }
+        } else if !trusted { popoverModel.trusted = false }
+    }
+
+    private func openAccessibilitySettings() {
+        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+        AXIsProcessTrustedWithOptions(options)
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    private func setLaunchAtLogin(_ enabled: Bool) {
+        do {
+            if enabled { try SMAppService.mainApp.register() }
+            else { try SMAppService.mainApp.unregister() }
+            popoverModel.launchAtLogin = SMAppService.mainApp.status == .enabled
+            popoverModel.loginError = nil
+        } catch {
+            popoverModel.launchAtLogin = SMAppService.mainApp.status == .enabled
+            popoverModel.loginError = error.localizedDescription
+        }
+    }
+
+    private func syncPopover() {
+        popoverModel.hidden = settings.hidden
+        popoverModel.names = settings.names
+        popoverModel.revealSeconds = settings.revealSeconds
+        popoverModel.paused = settings.paused
+        popoverModel.state = state
+        status.updatePopoverSize()
+    }
 
     func quit() {
         receive(.quitRequested)
@@ -161,6 +266,12 @@ final class AppController: NSObject, NSApplicationDelegate {
         case .unavailable(let reason): stateString = "unavailable:\(StatusItemController.warningText(reason))"
         }
         return ["state": stateString, "hidden": settings.hidden.sorted().joined(separator: ","),
-                "allowCount": String(engine.allowCount), "applied": engine.isApplied ? "yes" : "no"]
+                "allowCount": String(engine.allowCount), "applied": engine.isApplied ? "yes" : "no",
+                "popover": status.isOpen ? "open" : "closed", "trusted": AXIsProcessTrusted() ? "yes" : "no"]
+    }
+
+    var scanFound: String {
+        guard popoverModel.trusted else { return "untrusted" }
+        return popoverModel.apps.map(\.bundleID).sorted().joined(separator: ",")
     }
 }

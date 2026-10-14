@@ -8,12 +8,15 @@ public struct Settings: Codable, Equatable, Sendable {
         set { storedRevealSeconds = Self.clamp(newValue) }
     }
     public var paused: Bool
+    public var names: [String: String]
     public var schemaVersion: Int
 
-    public init(hidden: Set<String> = [], revealSeconds: Double = 10, paused: Bool = false, schemaVersion: Int = 1) {
+    public init(hidden: Set<String> = [], revealSeconds: Double = 10, paused: Bool = false,
+                names: [String: String] = [:], schemaVersion: Int = 1) {
         self.hidden = hidden
         self.storedRevealSeconds = Self.clamp(revealSeconds)
         self.paused = paused
+        self.names = names
         self.schemaVersion = schemaVersion
     }
 
@@ -22,7 +25,7 @@ public struct Settings: Codable, Equatable, Sendable {
         return min(120, max(3, value))
     }
 
-    private enum CodingKeys: String, CodingKey { case hidden, revealSeconds, paused, schemaVersion }
+    private enum CodingKeys: String, CodingKey { case hidden, revealSeconds, paused, names, schemaVersion }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -30,6 +33,7 @@ public struct Settings: Codable, Equatable, Sendable {
             hidden: try values.decode(Set<String>.self, forKey: .hidden),
             revealSeconds: try values.decode(Double.self, forKey: .revealSeconds),
             paused: try values.decode(Bool.self, forKey: .paused),
+            names: try values.decodeIfPresent([String: String].self, forKey: .names) ?? [:],
             schemaVersion: try values.decode(Int.self, forKey: .schemaVersion)
         )
     }
@@ -39,6 +43,7 @@ public struct Settings: Codable, Equatable, Sendable {
         try values.encode(hidden, forKey: .hidden)
         try values.encode(revealSeconds, forKey: .revealSeconds)
         try values.encode(paused, forKey: .paused)
+        try values.encode(names, forKey: .names)
         try values.encode(schemaVersion, forKey: .schemaVersion)
     }
 }

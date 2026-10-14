@@ -46,6 +46,23 @@ final class DebugChannel: NSObject {
             controller.setPaused(true, completion: reply)
         case "resume":
             controller.setPaused(false, completion: reply)
+        case "openPopover":
+            controller.openPopover()
+            reply()
+        case "closePopover":
+            controller.closePopover()
+            reply()
+        case "toggleApp":
+            guard let id = values["arg"], !id.isEmpty else {
+                logger.error("toggleApp missing bundle id")
+                reply()
+                return
+            }
+            controller.toggleApp(id, completion: reply)
+        case "scan":
+            controller.scanApps { [weak self] in
+                self?.sendReply(id: id, extra: ["found": controller.scanFound])
+            }
         case "state": reply()
         case "quit":
             controller.receive(.quitRequested)
@@ -57,9 +74,10 @@ final class DebugChannel: NSObject {
         }
     }
 
-    private func sendReply(id: String) {
+    private func sendReply(id: String, extra: [String: String] = [:]) {
         guard var values = controller?.debugSnapshot else { return }
         values["id"] = id
+        values.merge(extra) { _, new in new }
         center.postNotificationName(replyName, object: nil, userInfo: values, deliverImmediately: true)
     }
 }
