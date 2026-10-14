@@ -1,0 +1,44 @@
+name: SimpleMenubarHider
+options:
+  bundleIdPrefix: dev.yili
+  deploymentTarget:
+    macOS: "27.0"
+configs:
+  Debug: debug
+  Release: release
+packages:
+  SMHCore:
+    path: Packages/SMHCore
+targets:
+  SimpleMenubarHider:
+    type: application
+    platform: macOS
+    sources:
+      - path: App
+        excludes:
+          - README.md
+    dependencies:
+      - package: SMHCore
+    settings:
+      base:
+        PRODUCT_NAME: Simple Menubar Hider
+        PRODUCT_BUNDLE_IDENTIFIER: dev.yili.smh
+        MACOSX_DEPLOYMENT_TARGET: "27.0"
+        SWIFT_VERSION: "6.0"
+        SWIFT_STRICT_CONCURRENCY: complete
+        SWIFT_OBJC_BRIDGING_HEADER: App/Shim/SMHMenuBarShim.h
+        ENABLE_HARDENED_RUNTIME: YES
+        ENABLE_APP_SANDBOX: NO
+        CODE_SIGN_ENTITLEMENTS: ""
+        CODE_SIGN_IDENTITY: Developer ID Application
+        CODE_SIGN_STYLE: Manual
+        DEVELOPMENT_TEAM: 8Q5V8XK85Y
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_LSUIElement: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Simple Menubar Hider
+        INFOPLIST_KEY_CFBundleShortVersionString: 0.1.0
+        INFOPLIST_KEY_CFBundleVersion: 1
+        INFOPLIST_KEY_NSHumanReadableCopyright: Copyright © 2026 Yi Li
+      configs:
+        Debug:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
