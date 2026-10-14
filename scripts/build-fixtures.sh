@@ -56,6 +56,7 @@ build_app "FixtureOne" "dev.yili.smh.fixture.one"
 build_app "FixtureMany" "dev.yili.smh.fixture.many"
 build_app "FixtureFlicker" "dev.yili.smh.fixture.flicker"
 build_app "FixtureWide" "dev.yili.smh.fixture.wide"
+build_app "FixtureCompetitor" "dev.yili.smh.fixture.competitor"
 
 # Bundle-less fixture: plain command-line executable, no .app wrapper.
 xcrun clang -fobjc-arc -Wall -Wextra -framework AppKit "$FIXTURES_DIR/FixtureNoBundle/main.m" -o "$BUILD_DIR/fixture-nobundle"

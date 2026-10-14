@@ -6,9 +6,11 @@ set -euo pipefail
 # macOS kill it mid-test. Never launches anything.
 
 DRY_RUN=0
-if [ "${1:-}" = "--dry-run" ]; then
-  DRY_RUN=1
-fi
+case "${1:-}" in
+  "") ;;
+  --dry-run) DRY_RUN=1 ;;
+  *) echo "usage: scripts/install-fixtures.sh [--dry-run]" >&2; exit 2 ;;
+esac
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="$ROOT/Fixtures/build"
@@ -56,6 +58,15 @@ quit_running_copy() {
   fi
 }
 
+# check_source <name>: stops the script when the built app is missing.
+check_source() {
+  local src="$BUILD_DIR/$1.app"
+  if [ ! -f "$src/Contents/Info.plist" ] || [ ! -x "$src/Contents/MacOS/$1" ]; then
+    echo "ERROR: built fixture missing or incomplete: $src (run scripts/build-fixtures.sh first)" >&2
+    exit 1
+  fi
+}
+
 install_app() {
   local name="$1"
   local bundle_id="$2"
@@ -64,13 +75,16 @@ install_app() {
 
   # Safety gate: only ever delete one of the known fixture app names.
   case "$name" in
-    FixtureOne|FixtureMany|FixtureFlicker|FixtureWide|FixtureNoBundle)
+    FixtureOne|FixtureMany|FixtureFlicker|FixtureWide|FixtureCompetitor)
       ;;
     *)
       echo "ERROR: refusing to delete unexpected app name: $name" >&2
       exit 1
       ;;
   esac
+
+  # Never delete the installed copy unless a built copy is there to replace it.
+  check_source "$name"
 
   quit_running_copy "$name" "$bundle_id"
 
@@ -84,7 +98,13 @@ install_app() {
   fi
 }
 
+# Check every built app before anything is quit or deleted.
+for fixture in FixtureOne FixtureMany FixtureFlicker FixtureWide FixtureCompetitor; do
+  check_source "$fixture"
+done
+
 install_app "FixtureOne" "dev.yili.smh.fixture.one"
 install_app "FixtureMany" "dev.yili.smh.fixture.many"
 install_app "FixtureFlicker" "dev.yili.smh.fixture.flicker"
 install_app "FixtureWide" "dev.yili.smh.fixture.wide"
+install_app "FixtureCompetitor" "dev.yili.smh.fixture.competitor"
