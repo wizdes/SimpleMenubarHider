@@ -1,10 +1,12 @@
 #import <AppKit/AppKit.h>
 #import <ApplicationServices/ApplicationServices.h>
 #import <Foundation/Foundation.h>
+#import <ImageIO/ImageIO.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <dlfcn.h>
 #import <signal.h>
+#import <math.h>
 
 static NSString *stamp(void) {
     NSDateFormatter *f = [NSDateFormatter new];
@@ -148,7 +150,7 @@ static NSArray<NSString *> *ids(NSString *s) {
 
 static int hold(int argc, const char **argv) {
     NSString *hide = nil, *only = nil, *sys = nil;
-    double seconds = -1;
+    double seconds = -1, releaseAfter = -1, linger = -1;
     for (int i = 2; i < argc; i++) {
         NSString *arg = @(argv[i]);
         if ([arg isEqualToString:@"--hide"] && i + 1 < argc) hide = @(argv[++i]);
@@ -156,10 +158,17 @@ static int hold(int argc, const char **argv) {
         else if ([arg isEqualToString:@"--system-items"] && i + 1 < argc) sys = @(argv[++i]);
         else if ([arg isEqualToString:@"--seconds"] && i + 1 < argc) {
             NSString *value = @(argv[++i]); NSScanner *scan = [NSScanner scannerWithString:value];
-            if (![scan scanDouble:&seconds] || !scan.isAtEnd || seconds < 0) { fprintf(stderr, "invalid --seconds\n"); return 2; }
+            if (![scan scanDouble:&seconds] || !scan.isAtEnd || !isfinite(seconds) || seconds < 0) { fprintf(stderr, "invalid --seconds\n"); return 2; }
+        } else if ([arg isEqualToString:@"--release-after"] && i + 1 < argc) {
+            NSString *value = @(argv[++i]); NSScanner *scan = [NSScanner scannerWithString:value];
+            if (![scan scanDouble:&releaseAfter] || !scan.isAtEnd || !isfinite(releaseAfter) || releaseAfter < 0) { fprintf(stderr, "invalid --release-after\n"); return 2; }
+        } else if ([arg isEqualToString:@"--linger"] && i + 1 < argc) {
+            NSString *value = @(argv[++i]); NSScanner *scan = [NSScanner scannerWithString:value];
+            if (![scan scanDouble:&linger] || !scan.isAtEnd || !isfinite(linger) || linger < 0) { fprintf(stderr, "invalid --linger\n"); return 2; }
         } else { fprintf(stderr, "invalid hold argument: %s\n", arg.UTF8String); return 2; }
     }
     if (!hide) { fprintf(stderr, "hold requires --hide (empty is allowed)\n"); return 2; }
+    if ((releaseAfter >= 0) != (linger >= 0) || (seconds >= 0 && releaseAfter >= 0)) { fprintf(stderr, "use --release-after with --linger, without --seconds\n"); return 2; }
     NSArray *system = systemItems(sys);
     NSArray *hidden = ids(hide);
     NSArray *exclusive = only ? ids(only) : nil;
@@ -196,11 +205,17 @@ static int hold(int argc, const char **argv) {
     dispatch_source_set_event_handler(intSource, ^{ stop = YES; });
     dispatch_source_set_event_handler(termSource, ^{ stop = YES; });
     dispatch_resume(intSource); dispatch_resume(termSource);
-    NSDate *end = seconds >= 0 ? [NSDate dateWithTimeIntervalSinceNow:seconds] : nil;
+    NSDate *end = seconds >= 0 ? [NSDate dateWithTimeIntervalSinceNow:seconds] : (releaseAfter >= 0 ? [NSDate dateWithTimeIntervalSinceNow:releaseAfter] : nil);
     while (!stop && (!end || end.timeIntervalSinceNow > 0))
         [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
     ((void (*)(id, SEL))objc_msgSend)(assertion, @selector(invalidate));
     printf("RELEASED %s\n", stamp().UTF8String); fflush(stdout);
+    if (linger >= 0 && !stop) {
+        NSDate *lingerEnd = [NSDate dateWithTimeIntervalSinceNow:linger];
+        while (!stop && lingerEnd.timeIntervalSinceNow > 0)
+            [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+    }
+    printf("EXITING %s\n", stamp().UTF8String); fflush(stdout);
     dispatch_source_cancel(intSource); dispatch_source_cancel(termSource);
     return 0;
 }
@@ -263,9 +278,93 @@ static int count(int argc, const char **argv) {
     puts("COUNT unknown"); return 6;
 }
 
+static int visible(int argc, const char **argv) {
+    unsigned char target[3] = {255, 0, 255};
+    NSUInteger minimum = 40;
+    for (int i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "--color") == 0 && i + 1 < argc) {
+            const char *value = argv[++i];
+            if (strlen(value) != 6 || strspn(value, "0123456789abcdefABCDEF") != 6) { fprintf(stderr, "invalid --color\n"); return 2; }
+            unsigned int rgb;
+            if (sscanf(value, "%x", &rgb) != 1) { fprintf(stderr, "invalid --color\n"); return 2; }
+            target[0] = (rgb >> 16) & 255; target[1] = (rgb >> 8) & 255; target[2] = rgb & 255;
+        } else if (strcmp(argv[i], "--min-pixels") == 0 && i + 1 < argc) {
+            const char *value = argv[++i];
+            if (!*value || strspn(value, "0123456789") != strlen(value)) { fprintf(stderr, "invalid --min-pixels\n"); return 2; }
+            unsigned long long parsed = strtoull(value, NULL, 10);
+            if (parsed == 0 || parsed > NSUIntegerMax) { fprintf(stderr, "invalid --min-pixels\n"); return 2; }
+            minimum = (NSUInteger)parsed;
+        } else { fprintf(stderr, "usage: visible [--color RRGGBB] [--min-pixels N]\n"); return 2; }
+    }
+    CFAbsoluteTime started = CFAbsoluteTimeGetCurrent();
+    NSUInteger matching = 0;
+    NSUInteger captures = 0;
+    CGFloat mainTop = NSMaxY(NSScreen.mainScreen.frame);
+    for (NSScreen *screen in NSScreen.screens) {
+        NSRect frame = screen.frame, visibleFrame = screen.visibleFrame;
+        NSInteger x = (NSInteger)llround(NSMinX(frame) - NSMinX(NSScreen.mainScreen.frame));
+        NSInteger y = (NSInteger)llround(mainTop - NSMaxY(frame));
+        NSInteger w = (NSInteger)llround(NSWidth(frame));
+        NSInteger h = (NSInteger)llround(NSMaxY(frame) - NSMaxY(visibleFrame));
+        if (w <= 0 || h <= 0) continue;
+        captures++;
+        NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"smh-visible-%@.png", NSUUID.UUID.UUIDString]];
+        NSTask *task = [NSTask new];
+        task.launchPath = @"/usr/sbin/screencapture";
+        task.arguments = @[@"-x", @"-R", [NSString stringWithFormat:@"%ld,%ld,%ld,%ld", (long)x, (long)y, (long)w, (long)h], path];
+        @try { [task launch]; } @catch (NSException *e) {
+            fprintf(stderr, "capture launch failed: %s\n", e.reason.UTF8String);
+            fprintf(stderr, "capture_ms %.1f\n", (CFAbsoluteTimeGetCurrent() - started) * 1000);
+            return 7;
+        }
+        [task waitUntilExit];
+        if (task.terminationStatus != 0) {
+            [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+            fprintf(stderr, "capture failed for screen at %ld,%ld (exit %d)\n", (long)x, (long)y, task.terminationStatus);
+            fprintf(stderr, "capture_ms %.1f\n", (CFAbsoluteTimeGetCurrent() - started) * 1000);
+            return 7;
+        }
+        CGImageSourceRef source = CGImageSourceCreateWithURL((__bridge CFURLRef)[NSURL fileURLWithPath:path], NULL);
+        CGImageRef image = source ? CGImageSourceCreateImageAtIndex(source, 0, NULL) : NULL;
+        if (source) CFRelease(source);
+        [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+        if (!image) {
+            fprintf(stderr, "capture image could not be loaded\n");
+            fprintf(stderr, "capture_ms %.1f\n", (CFAbsoluteTimeGetCurrent() - started) * 1000);
+            return 7;
+        }
+        size_t width = CGImageGetWidth(image), height = CGImageGetHeight(image);
+        size_t stride = width * 4;
+        unsigned char *pixels = calloc(height, stride);
+        CGColorSpaceRef colorSpace = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+        CGContextRef context = pixels ? CGBitmapContextCreate(pixels, width, height, 8, stride, colorSpace, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big) : NULL;
+        CGColorSpaceRelease(colorSpace);
+        if (!context) {
+            free(pixels); CGImageRelease(image);
+            fprintf(stderr, "capture image conversion failed\n");
+            fprintf(stderr, "capture_ms %.1f\n", (CFAbsoluteTimeGetCurrent() - started) * 1000);
+            return 7;
+        }
+        CGContextDrawImage(context, CGRectMake(0, 0, width, height), image);
+        for (size_t p = 0; p < width * height; p++) {
+            unsigned char *rgb = pixels + p * 4;
+            if (abs((int)rgb[0] - target[0]) <= 12 && abs((int)rgb[1] - target[1]) <= 12 && abs((int)rgb[2] - target[2]) <= 12) matching++;
+        }
+        CGContextRelease(context); CGImageRelease(image); free(pixels);
+    }
+    if (captures == 0) {
+        fprintf(stderr, "capture failed: no menu bar strip found\n");
+        fprintf(stderr, "capture_ms %.1f\n", (CFAbsoluteTimeGetCurrent() - started) * 1000);
+        return 7;
+    }
+    fprintf(stderr, "capture_ms %.1f\n", (CFAbsoluteTimeGetCurrent() - started) * 1000);
+    printf("%s %lu\n", matching >= minimum ? "VISIBLE" : "HIDDEN", (unsigned long)matching);
+    return matching >= minimum ? 0 : 1;
+}
+
 int main(int argc, const char **argv) {
     @autoreleasepool {
-        if (argc < 2) { fprintf(stderr, "usage: smh-spike probe|owners|hold|count\n"); return 2; }
+        if (argc < 2) { fprintf(stderr, "usage: smh-spike probe|owners|hold|count|visible\n"); return 2; }
         if (strcmp(argv[1], "probe") == 0) { Class a = Nil, b = Nil; return loadAPI(&a, &b) ? 0 : 3; }
         if (strcmp(argv[1], "owners") == 0) {
             if (argc == 2) return owners(nil);
@@ -274,6 +373,7 @@ int main(int argc, const char **argv) {
         }
         if (strcmp(argv[1], "hold") == 0) return hold(argc, argv);
         if (strcmp(argv[1], "count") == 0) return count(argc, argv);
+        if (strcmp(argv[1], "visible") == 0) return visible(argc, argv);
         fprintf(stderr, "unknown subcommand: %s\n", argv[1]); return 2;
     }
 }

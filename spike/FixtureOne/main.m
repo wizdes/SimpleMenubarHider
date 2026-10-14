@@ -8,7 +8,13 @@
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
     (void)notification;
     self.item = [[NSStatusBar systemStatusBar] statusItemWithLength:NSVariableStatusItemLength];
-    self.item.button.title = @"F1";
+    NSImage *image = [NSImage imageWithSize:NSMakeSize(16, 16) flipped:NO drawingHandler:^BOOL(NSRect rect) {
+        [[NSColor colorWithSRGBRed:1 green:0 blue:1 alpha:1] setFill];
+        NSRectFill(rect);
+        return YES;
+    }];
+    image.template = NO;
+    self.item.button.image = image;
 }
 @end
 

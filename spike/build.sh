@@ -10,7 +10,7 @@ xcrun --find clang >/dev/null
 out="$here/build"
 app="$out/FixtureOne.app"
 mkdir -p "$app/Contents/MacOS"
-xcrun clang -fobjc-arc -Wall -Wextra -framework Foundation -framework AppKit -framework ApplicationServices "$here/smh-spike.m" -o "$out/smh-spike"
+xcrun clang -fobjc-arc -Wall -Wextra -framework Foundation -framework AppKit -framework ApplicationServices -framework ImageIO "$here/smh-spike.m" -o "$out/smh-spike"
 xcrun clang -fobjc-arc -Wall -Wextra -framework AppKit "$here/FixtureOne/main.m" -o "$app/Contents/MacOS/FixtureOne"
 cp "$here/FixtureOne/Info.plist" "$app/Contents/Info.plist"
 
