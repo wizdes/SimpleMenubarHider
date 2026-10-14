@@ -45,7 +45,8 @@ final class PopoverModel: ObservableObject {
             (text as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: size)]).width
         }
         var widest = measure(Self.headerTitle, 11) - PopoverLayout.checkColumn
-        widest = max(widest, measure(Self.delayTitle, 13) + 16 + measure(delayTrailing, 13))
+        // 16 pt is the row's minimum gap; 12 pt more covers SwiftUI drawing wider than NSString measures (the title was cut off).
+        widest = max(widest, measure(Self.delayTitle, 13) + 16 + 12 + measure(delayTrailing, 13))
         for title in Self.actionTitles { widest = max(widest, measure(title, 13)) }
         if trusted {
             for row in rows {
