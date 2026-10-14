@@ -192,12 +192,19 @@ final class AppController: NSObject, NSApplicationDelegate {
             guard let self else { return }
             self.popoverModel.trusted = apps != nil
             self.popoverModel.scanning = false
+            self.popoverModel.running = Self.runningBundleIDs()
             if let apps {
                 self.popoverModel.apps = apps
+                // Save only when a hidden app's name changed, so opening the popover never writes settings.
+                var names = self.settings.names
                 for app in apps where self.settings.hidden.contains(app.bundleID) {
-                    self.settings.names[app.bundleID] = app.name
+                    names[app.bundleID] = app.name
                 }
-                self.store.save(self.settings)
+                if names != self.settings.names {
+                    self.settings.names = names
+                    self.store.save(self.settings)
+                    self.popoverModel.names = names
+                }
             }
             self.status.updatePopoverSize()
             completion?()
@@ -243,7 +250,12 @@ final class AppController: NSObject, NSApplicationDelegate {
         }
     }
 
+    private static func runningBundleIDs() -> Set<String> {
+        Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
+    }
+
     private func syncPopover() {
+        popoverModel.running = Self.runningBundleIDs()
         popoverModel.hidden = settings.hidden
         popoverModel.names = settings.names
         popoverModel.revealSeconds = settings.revealSeconds

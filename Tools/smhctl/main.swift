@@ -5,14 +5,15 @@ import Foundation
 //   smhctl <cmd> [arg] [--timeout-ms 5000]
 //
 // Posts dev.yili.smh.debug.command with a fresh id, waits for the matching
-// dev.yili.smh.debug.state reply on the main run loop, prints one line
-//   state=<..> hidden=<..> allowCount=<..> applied=<..>
-// and exits 0, or prints TIMEOUT and exits 3. The observer is registered
+// dev.yili.smh.debug.state reply on the main run loop, prints one line with
+// every reply field except id, sorted by key, for example
+//   allowCount=<..> applied=<..> hidden=<..> popover=<..> state=<..> trusted=<..>
+// (a scan reply also has found=<..>) and exits 0, or prints TIMEOUT and exits 3. The observer is registered
 // before posting so the reply cannot be missed. Foundation only.
 
 func usageError(_ message: String) -> Never {
     FileHandle.standardError.write((message + "\n").data(using: .utf8)!)
-    FileHandle.standardError.write("usage: smhctl <setHidden|setRevealSeconds|reveal|pause|resume|state|quit> [arg] [--timeout-ms 5000]\n".data(using: .utf8)!)
+    FileHandle.standardError.write("usage: smhctl <setHidden|setRevealSeconds|toggleApp|openPopover|closePopover|scan|reveal|pause|resume|state|quit> [arg] [--timeout-ms 5000]\n".data(using: .utf8)!)
     exit(2)
 }
 
@@ -22,8 +23,8 @@ guard let cmd = tokens.first, !cmd.hasPrefix("-") else {
 }
 tokens.removeFirst()
 
-let commandsWithArg: Set<String> = ["setHidden", "setRevealSeconds"]
-let commandsWithoutArg: Set<String> = ["reveal", "pause", "resume", "state", "quit"]
+let commandsWithArg: Set<String> = ["setHidden", "setRevealSeconds", "toggleApp"]
+let commandsWithoutArg: Set<String> = ["openPopover", "closePopover", "scan", "reveal", "pause", "resume", "state", "quit"]
 guard commandsWithArg.contains(cmd) || commandsWithoutArg.contains(cmd) else {
     usageError("unknown command: \(cmd)")
 }
@@ -55,6 +56,9 @@ if commandsWithoutArg.contains(cmd) && arg != nil {
 if cmd == "setRevealSeconds" && arg == nil {
     usageError("setRevealSeconds requires seconds")
 }
+if cmd == "toggleApp" && (arg ?? "").isEmpty {
+    usageError("toggleApp requires a bundle id")
+}
 // setHidden with no arg means the empty set.
 let sendArg: String? = commandsWithArg.contains(cmd) ? (arg ?? "") : nil
 
@@ -68,12 +72,12 @@ var reply: [String: String]? = nil
 let observer = center.addObserver(forName: stateName, object: nil, queue: OperationQueue.main) { note in
     guard let info = note.userInfo else { return }
     guard let echoed = info["id"] as? String, echoed == requestID else { return }
-    reply = [
-        "state": (info["state"] as? String) ?? "",
-        "hidden": (info["hidden"] as? String) ?? "",
-        "allowCount": (info["allowCount"] as? String) ?? "",
-        "applied": (info["applied"] as? String) ?? "",
-    ]
+    var fields: [String: String] = [:]
+    for (key, value) in info {
+        guard let key = key as? String, key != "id" else { continue }
+        fields[key] = (value as? String) ?? String(describing: value)
+    }
+    reply = fields
 }
 
 var userInfo: [String: String] = ["id": requestID, "cmd": cmd]
@@ -92,4 +96,4 @@ guard let result = reply else {
     print("TIMEOUT")
     exit(3)
 }
-print("state=\(result["state"]!) hidden=\(result["hidden"]!) allowCount=\(result["allowCount"]!) applied=\(result["applied"]!)")
+print(result.keys.sorted().map { "\($0)=\(result[$0]!)" }.joined(separator: " "))

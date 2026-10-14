@@ -4,7 +4,12 @@ import SMHCore
 
 @MainActor
 final class PopoverModel: ObservableObject {
+    static let headerTitle = "Hide menu bar icons for"
+    static let delayTitle = "Hide Again After"
+    static let actionTitles = ["Launch at Login", "Pause Hiding", "Quit Simple Menubar Hider"]
+
     @Published var apps: [MenuBarApp] = []
+    @Published var running: Set<String> = []
     @Published var hidden: Set<String> = []
     @Published var names: [String: String] = [:]
     @Published var state: BarState = .expanded
@@ -14,6 +19,7 @@ final class PopoverModel: ObservableObject {
     @Published var scanning = true
     @Published var launchAtLogin = false
     @Published var loginError: String?
+    @Published var highlight = PopoverHighlight()
     var toggleApp: ((String) -> Void)?
     var setRevealSeconds: ((Double) -> Void)?
     var setPaused: ((Bool) -> Void)?
@@ -21,114 +27,125 @@ final class PopoverModel: ObservableObject {
     var openAccessibilitySettings: (() -> Void)?
     var quit: (() -> Void)?
 
-    var rows: [MenuBarApp] {
-        var byID = Dictionary(uniqueKeysWithValues: apps.map { ($0.bundleID, $0) })
-        for id in hidden where byID[id] == nil {
-            byID[id] = MenuBarApp(bundleID: id, name: names[id] ?? id)
-        }
-        return byID.values.sorted {
-            let order = $0.name.localizedCaseInsensitiveCompare($1.name)
-            return order == .orderedSame ? $0.bundleID < $1.bundleID : order == .orderedAscending
-        }
+    var rows: [PopoverRow] {
+        PopoverRows.build(scanned: apps, hidden: hidden, names: names, running: running)
     }
 
-    var runningIDs: Set<String> { Set(apps.map(\.bundleID)) }
     var footerVisible: Bool {
         guard !hidden.isEmpty && !paused else { return false }
         if case .unavailable = state { return false }
+        return true
+    }
+
+    var delayTrailing: String { "\(RevealDelayChoice.label(for: revealSeconds))  ›" }
+
+    /// Width of the widest row, like a native menu. See PopoverLayout.width.
+    var contentWidth: CGFloat {
+        func measure(_ text: String, _ size: CGFloat) -> CGFloat {
+            (text as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: size)]).width
+        }
+        var widest = measure(Self.headerTitle, 11) - PopoverLayout.checkColumn
+        widest = max(widest, measure(Self.delayTitle, 13) + 16 + measure(delayTrailing, 13))
+        for title in Self.actionTitles { widest = max(widest, measure(title, 13)) }
+        if trusted {
+            for row in rows {
+                widest = max(widest, measure(row.name, 13) + (row.isRunning ? 0 : 4 + measure("not running", 10)))
+            }
+        }
+        return PopoverLayout.width(widestText: widest)
+    }
+
+    func popoverOpened() { highlight.popoverOpened() }
+
+    /// Returns true when the key belongs to the popover list, so the caller swallows it.
+    func handleKey(_ key: PopoverKey) -> Bool {
+        if case .toggle(let id) = highlight.handle(key, rows: rows.map(\.bundleID)) { toggleApp?(id) }
         return true
     }
 }
 
 struct PopoverView: View {
     @ObservedObject var model: PopoverModel
-    @State private var highlightedID: String?
     @State private var hoveredAction: String?
-    @FocusState private var listFocused: Bool
-    private let rowHeight: CGFloat = 22
+    @State private var delayAnchor = MenuAnchor()
+    private let rowHeight = PopoverLayout.rowHeight
+    private let edge = PopoverLayout.rowInset + PopoverLayout.listInset
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Hide menu bar icons for")
+            Text(PopoverModel.headerTitle)
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 14)
-                .padding(.top, 10)
+                .padding(.horizontal, edge)
+                .padding(.top, 8)
                 .padding(.bottom, 5)
             if !model.trusted {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Allow Accessibility access so SMH can find apps with menu bar icons.")
+                        .fixedSize(horizontal: false, vertical: true)
                     Button("Open Accessibility Settings") { model.openAccessibilitySettings?() }
+                        .focusable(false)
                 }
                 .font(.system(size: 13))
-                .padding(.horizontal, 14).padding(.bottom, 8)
+                .padding(.horizontal, edge).padding(.bottom, 8)
             } else {
                 if let warning = warningText {
                     Text(warning)
                         .font(.system(size: 12))
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 14).padding(.bottom, 6)
+                        .padding(.horizontal, edge).padding(.bottom, 6)
                 }
+                let rows = model.rows
                 if model.scanning && model.apps.isEmpty {
                     HStack(spacing: 7) { ProgressView().controlSize(.small); Text("Finding apps…") }
-                        .font(.system(size: 13)).padding(.horizontal, 14).padding(.vertical, 8)
-                } else if model.rows.isEmpty {
+                        .font(.system(size: 13)).padding(.horizontal, edge).padding(.vertical, 8)
+                } else if rows.isEmpty {
                     Text("No other apps have menu bar icons right now.")
-                        .font(.system(size: 13)).padding(.horizontal, 14).padding(.vertical, 8)
+                        .font(.system(size: 13))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, edge).padding(.vertical, 8)
                 } else {
+                    // No focus and no starting highlight: StatusItemController routes arrow keys,
+                    // Space and Return here through PopoverHighlight, which ignores them until armed.
                     ScrollViewReader { proxy in
                         ScrollView {
                             VStack(spacing: 0) {
-                                ForEach(model.rows) { app in
-                                    appRow(app).id(app.id)
+                                ForEach(rows) { row in
+                                    appRow(row).id(row.id)
                                 }
-                            }.padding(.horizontal, 6)
+                            }.padding(.horizontal, PopoverLayout.listInset)
                         }
-                        .frame(maxHeight: rowHeight * 14)
-                        .focusable()
-                        .focused($listFocused)
-                        .focusEffectDisabled()
-                        .onAppear {
-                            highlightedID = model.rows.first?.id
-                            listFocused = true
+                        .frame(height: CGFloat(min(rows.count, PopoverLayout.maxVisibleRows)) * rowHeight)
+                        .onChange(of: model.highlight.highlightedID) { _, id in
+                            if let id { proxy.scrollTo(id) }
                         }
-                        .onKeyPress(.upArrow) { moveHighlight(-1, proxy: proxy); return .handled }
-                        .onKeyPress(.downArrow) { moveHighlight(1, proxy: proxy); return .handled }
-                        .onKeyPress(.space) { activateHighlighted(); return .handled }
-                        .onKeyPress(.return) { activateHighlighted(); return .handled }
                     }
                 }
             }
             Divider().padding(.vertical, 5)
-            Menu {
-                ForEach([5, 10, 30, 60], id: \.self) { seconds in
-                    Button("\(seconds) seconds") { model.setRevealSeconds?(Double(seconds)) }
-                }
-            } label: {
-                menuRow("Hide Again After", trailing: "\(Int(model.revealSeconds)) seconds  ▸")
-            }.menuStyle(.borderlessButton)
-                .onHover { inside in hoveredAction = inside ? "Hide Again After" : nil }
-            actionRow("Launch at Login", checked: model.launchAtLogin) {
+            delayRow
+            actionRow(PopoverModel.actionTitles[0], checked: model.launchAtLogin) {
                 model.setLaunchAtLogin?(!model.launchAtLogin)
             }
             if let error = model.loginError {
                 Text(error).font(.system(size: 11)).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 14).padding(.bottom, 4)
+                    .padding(.horizontal, edge).padding(.bottom, 4)
             }
-            actionRow("Pause Hiding", checked: model.paused) { model.setPaused?(!model.paused) }
+            actionRow(PopoverModel.actionTitles[1], checked: model.paused) { model.setPaused?(!model.paused) }
             Divider().padding(.vertical, 5)
-            actionRow("Quit Simple Menubar Hider", checked: false) { model.quit?() }
+            actionRow(PopoverModel.actionTitles[2], checked: false) { model.quit?() }
             if model.footerVisible {
                 Text("The Focus (moon) icon also hides while hiding is on. This is a macOS limit.")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 14).padding(.top, 6).padding(.bottom, 9)
+                    .padding(.horizontal, edge).padding(.top, 6).padding(.bottom, 9)
             } else {
                 Spacer().frame(height: 6)
             }
         }
-        .frame(width: 280)
+        .frame(width: model.contentWidth, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
         .background(.regularMaterial)
     }
 
@@ -144,52 +161,58 @@ struct PopoverView: View {
         }
     }
 
-    private func appRow(_ app: MenuBarApp) -> some View {
-        let checked = model.hidden.contains(app.bundleID)
-        let running = model.runningIDs.contains(app.bundleID)
-        let selected = highlightedID == app.bundleID
+    private func appRow(_ row: PopoverRow) -> some View {
+        let checked = model.hidden.contains(row.bundleID)
+        let selected = model.highlight.highlightedID == row.bundleID
         return Button {
-            highlightedID = app.bundleID
-            model.toggleApp?(app.bundleID)
+            model.toggleApp?(row.bundleID)
         } label: {
             HStack(spacing: 0) {
                 Text(checked ? "✓" : " ")
-                    .frame(width: 19, alignment: .leading)
+                    .frame(width: PopoverLayout.checkColumn, alignment: .leading)
                     .foregroundStyle(selected ? .white : .primary)
-                Text(app.name)
-                    .foregroundStyle(selected ? .white : (running ? .primary : .secondary))
+                Text(row.name)
+                    .foregroundStyle(selected ? .white : (row.isRunning ? .primary : .secondary))
                     .lineLimit(1)
+                    .truncationMode(.middle)
                 Spacer(minLength: 4)
-                if !running {
+                if !row.isRunning {
                     Text("not running").font(.system(size: 10))
                         .foregroundStyle(selected ? .white : .secondary)
+                        .fixedSize()
                 }
             }
             .font(.system(size: 13))
-            .padding(.horizontal, 8)
+            .padding(.horizontal, PopoverLayout.rowInset)
             .frame(height: rowHeight)
             .background(selected ? Color.accentColor : .clear, in: RoundedRectangle(cornerRadius: 5))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { inside in if inside { highlightedID = app.bundleID } }
+        .focusable(false)
+        .onHover { inside in
+            if inside { model.highlight.hoverBegan(row.bundleID) } else { model.highlight.hoverEnded(row.bundleID) }
+        }
         .accessibilityRepresentation {
-            Toggle(running ? app.name : "\(app.name), not running", isOn: Binding(
-                get: { model.hidden.contains(app.bundleID) },
-                set: { _ in model.toggleApp?(app.bundleID) }
+            Toggle(row.isRunning ? row.name : "\(row.name), not running", isOn: Binding(
+                get: { model.hidden.contains(row.bundleID) },
+                set: { _ in model.toggleApp?(row.bundleID) }
             ))
         }
     }
 
     private func menuRow(_ title: String, trailing: String? = nil, checked: Bool = false) -> some View {
         HStack(spacing: 0) {
-            Text(checked ? "✓" : " ").frame(width: 19, alignment: .leading)
-            Text(title)
-            Spacer()
-            if let trailing { Text(trailing).foregroundStyle(.secondary) }
+            Text(checked ? "✓" : " ").frame(width: PopoverLayout.checkColumn, alignment: .leading)
+            Text(title).lineLimit(1)
+            Spacer(minLength: 16)
+            if let trailing {
+                Text(trailing).lineLimit(1)
+                    .foregroundStyle(hoveredAction == title ? Color.white : Color.secondary)
+            }
         }
         .font(.system(size: 13))
-        .padding(.horizontal, 14)
+        .padding(.horizontal, PopoverLayout.rowInset)
         .frame(height: rowHeight)
         .contentShape(Rectangle())
         .background(hoveredAction == title ? Color.accentColor : .clear, in: RoundedRectangle(cornerRadius: 5))
@@ -199,21 +222,72 @@ struct PopoverView: View {
     private func actionRow(_ title: String, checked: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) { menuRow(title, checked: checked) }
             .buttonStyle(.plain)
+            .focusable(false)
             .onHover { inside in hoveredAction = inside ? title : nil }
+            .padding(.horizontal, PopoverLayout.listInset)
             .accessibilityLabel(title)
             .accessibilityValue(checked ? "checked" : "unchecked")
     }
 
-    private func moveHighlight(_ offset: Int, proxy: ScrollViewProxy) {
-        let rows = model.rows
-        guard !rows.isEmpty else { return }
-        let index = rows.firstIndex { $0.bundleID == highlightedID } ?? (offset > 0 ? -1 : rows.count)
-        let next = min(rows.count - 1, max(0, index + offset))
-        highlightedID = rows[next].bundleID
-        proxy.scrollTo(rows[next].id)
+    /// A plain row; clicking it pops up a native menu of delays at the row's right edge.
+    private var delayRow: some View {
+        Button { showDelayMenu() } label: {
+            menuRow(PopoverModel.delayTitle, trailing: model.delayTrailing)
+                .background(MenuAnchorView(anchor: delayAnchor))
+        }
+        .buttonStyle(.plain)
+        .focusable(false)
+        .onHover { inside in hoveredAction = inside ? PopoverModel.delayTitle : nil }
+        .padding(.horizontal, PopoverLayout.listInset)
+        .accessibilityLabel(PopoverModel.delayTitle)
+        .accessibilityValue(RevealDelayChoice.label(for: model.revealSeconds))
     }
 
-    private func activateHighlighted() {
-        if let highlightedID { model.toggleApp?(highlightedID) }
+    private func showDelayMenu() {
+        guard let view = delayAnchor.view else { return }
+        let menu = NSMenu()
+        for option in RevealDelayChoice.options {
+            let item = ClosureMenuItem(title: option.label) { [model] in model.setRevealSeconds?(option.seconds) }
+            item.state = option.seconds == model.revealSeconds ? .on : .off
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: view.bounds.maxX, y: view.bounds.minY), in: view)
+        hoveredAction = nil
     }
+}
+
+/// Holds the AppKit view behind a SwiftUI row, so an NSMenu can pop up next to it.
+@MainActor
+final class MenuAnchor {
+    weak var view: NSView?
+}
+
+private final class FlippedView: NSView {
+    override var isFlipped: Bool { true }
+}
+
+private struct MenuAnchorView: NSViewRepresentable {
+    let anchor: MenuAnchor
+
+    func makeNSView(context: Context) -> NSView {
+        let view = FlippedView()
+        anchor.view = view
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) { anchor.view = nsView }
+}
+
+private final class ClosureMenuItem: NSMenuItem {
+    private var handler: (() -> Void)?
+
+    init(title: String, handler: @escaping () -> Void) {
+        self.handler = handler
+        super.init(title: title, action: #selector(run), keyEquivalent: "")
+        target = self
+    }
+
+    required init(coder: NSCoder) { super.init(coder: coder) }
+
+    @objc private func run() { handler?() }
 }

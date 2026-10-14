@@ -13,6 +13,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let popover = NSPopover()
     private var panel: FallbackPanel?
+    private var content: NSHostingController<PopoverView>?
+    private var keyMonitor: Any?
     private let model: PopoverModel
     var onEvent: ((BarEvent) -> Void)?
     var onOpen: (() -> Void)?
@@ -57,10 +59,16 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
     func openPopover() {
         if isOpen { return }
+        model.popoverOpened()
         onOpen?()
         let content = NSHostingController(rootView: PopoverView(model: model))
-        let height = contentHeight
-        content.preferredContentSize = NSSize(width: 280, height: height)
+        // fittingSize alone sizes the popover. Ignoring the window's safe area keeps a blank band off the top.
+        content.sizingOptions = []
+        content.safeAreaRegions = []
+        self.content = content
+        let size = fittingSize()
+        content.preferredContentSize = size
+        installKeyMonitor()
         if let button = statusItem.button, let window = button.window {
             let frame = window.convertToScreen(button.convert(button.bounds, to: nil))
             let visible = NSScreen.screens.contains { $0.frame.intersects(frame) }
@@ -76,7 +84,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             logger.warning("popover anchor has no button window; path=mouse-panel")
         }
         let mouse = NSEvent.mouseLocation
-        let panel = FallbackPanel(contentRect: NSRect(x: mouse.x - 140, y: mouse.y - height - 6, width: 280, height: height),
+        let panel = FallbackPanel(contentRect: NSRect(x: mouse.x - size.width / 2, y: mouse.y - size.height - 6,
+                                                      width: size.width, height: size.height),
                                   styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.contentViewController = content
         panel.isFloatingPanel = true
@@ -87,8 +96,9 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     }
 
     func updatePopoverSize() {
-        guard isOpen else { return }
-        let size = NSSize(width: 280, height: contentHeight)
+        guard isOpen, let content else { return }
+        let size = fittingSize()
+        content.preferredContentSize = size
         if popover.isShown { popover.contentSize = size }
         if let panel {
             var frame = panel.frame
@@ -99,15 +109,35 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         }
     }
 
-    private var contentHeight: CGFloat {
-        let rowCount = model.trusted ? min(model.rows.count, 14) : 0
-        let messageHeight: CGFloat = model.trusted ? (model.scanning || model.rows.isEmpty ? 48 : 0) : 85
-        let footerHeight: CGFloat = model.footerVisible ? 48 : 0
-        let warningHeight: CGFloat
-        if case .unavailable = model.state, model.trusted { warningHeight = 65 }
-        else { warningHeight = 0 }
-        return 145 + CGFloat(rowCount) * 22 + messageHeight + footerHeight + warningHeight
-            + (model.loginError == nil ? 0 : 35)
+    /// Measures a fresh copy of the view, because the shown one picks up model changes only on its next update.
+    private func fittingSize() -> NSSize {
+        let measure = NSHostingController(rootView: PopoverView(model: model))
+        let size = measure.sizeThatFits(in: NSSize(width: PopoverLayout.maxWidth, height: 10_000))
+        return NSSize(width: size.width.rounded(.up), height: size.height.rounded(.up))
+    }
+
+    /// Routes arrow keys, Space and Return to the app list without giving the list focus.
+    /// PopoverHighlight decides whether Space and Return may toggle a row.
+    private func installKeyMonitor() {
+        removeKeyMonitor()
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, let window = self.content?.view.window, event.window === window,
+                  event.modifierFlags.intersection([.command, .control, .option]).isEmpty else { return event }
+            let key: PopoverKey
+            switch event.keyCode {
+            case 126: key = .up
+            case 125: key = .down
+            case 49: key = .space
+            case 36, 76: key = .returnKey
+            default: return event
+            }
+            return self.model.handleKey(key) ? nil : event
+        }
+    }
+
+    private func removeKeyMonitor() {
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        keyMonitor = nil
     }
 
     func closePopover() {
@@ -115,11 +145,17 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         if let panel {
             panel.close()
             self.panel = nil
+            removeKeyMonitor()
+            content = nil
             onEvent?(.menuClosed(now: Date()))
         }
     }
 
-    func popoverDidClose(_ notification: Notification) { onEvent?(.menuClosed(now: Date())) }
+    func popoverDidClose(_ notification: Notification) {
+        removeKeyMonitor()
+        content = nil
+        onEvent?(.menuClosed(now: Date()))
+    }
 
     @objc private func clicked() {
         guard let event = NSApp.currentEvent else { return }
