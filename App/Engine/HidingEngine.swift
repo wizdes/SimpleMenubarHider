@@ -8,9 +8,11 @@ final class HidingEngine {
     private let logger = Logger(subsystem: "dev.yili.smh", category: "engine")
     private(set) var activeList: [String]?
     private var pendingList: [String]?
+    private var applyCounter = ApplyCounter()
 
     var isApplied: Bool { activeList != nil }
     var allowCount: Int { activeList?.count ?? 0 }
+    var applyCount: Int { applyCounter.value }
 
     func apply(list: [String], completion: @escaping @MainActor @Sendable (Error?) -> Void) {
         if pendingList == nil && activeList == list {
@@ -26,6 +28,7 @@ final class HidingEngine {
                     self.logger.error("apply failed: \(error.localizedDescription, privacy: .public)")
                 } else {
                     self.activeList = list
+                    self.applyCounter.recordSuccess()
                 }
                 if self.pendingList == list { self.pendingList = nil }
                 completion(error)

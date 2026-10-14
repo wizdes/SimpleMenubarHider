@@ -26,7 +26,9 @@ End-to-end tests drive SMH through macOS distributed notifications. The channel 
 ## Reply
 
 - Name: `dev.yili.smh.debug.state`
-- userInfo (strings): `id` (echo), `state` (`expanded`, `collapsed`, `revealing`, or `unavailable:<reason>`), `hidden` (comma-separated, sorted), `allowCount` (number of bundle ids in the active allow list, `0` when nothing is applied), `applied` (`yes` when an assertion is active), `popover` (`open` or `closed`), and `trusted` (`yes` or `no`). A `scan` reply also has `found`: comma-separated sorted bundle ids, empty when none were found, or `untrusted` when Accessibility access is unavailable.
+- userInfo (strings): `id` (echo), `state` (`expanded`, `collapsed`, `revealing`, or `unavailable:<reason>`), `hidden` (comma-separated, sorted), `allowCount` (number of bundle ids in the active allow list, `0` when nothing is applied), `applied` (`yes` when an assertion is active), `applyCount` (successful assertion applies since launch; a skipped no-op does not count), `conflict` (comma-separated sorted bundle ids of running competing hiders, empty when none), `settingsNote` (the corrupt settings reason on the launch that repaired them, empty otherwise), `popover` (`open` or `closed`), and `trusted` (`yes` or `no`). A `scan` reply also has `found`: comma-separated sorted bundle ids, empty when none were found, or `untrusted` when Accessibility access is unavailable.
+
+In Debug builds, launch with `SMH_DEBUG_FORCE_SHIM_MISSING=1` to test the unavailable state without applying an assertion. For example: `open -g -n --env SMH_DEBUG_FORCE_SHIM_MISSING=1 -a "/Applications/Simple Menubar Hider.app"`. Release builds have no code or string for this flag.
 
 SMH sends the reply after the command's actions have run, and after an apply has finished (its completion handler called), so a test may take a screenshot as soon as the reply arrives.
 
@@ -38,7 +40,7 @@ The popover closes with a short animation, so a `closePopover` reply can still s
 
 ```
 $ smhctl scan
-allowCount=0 applied=no found=com.example.app hidden= popover=closed state=expanded trusted=yes
+allowCount=0 applied=no applyCount=0 conflict= found=com.example.app hidden= popover=closed settingsNote= state=expanded trusted=yes
 ```
 
 `setHidden`, `setRevealSeconds` and `toggleApp` take an argument (`toggleApp` needs a bundle id). The other commands take none. Add `--timeout-ms N` to wait longer than 5000 ms; on timeout it prints `TIMEOUT` and exits 3.

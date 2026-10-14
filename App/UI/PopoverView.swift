@@ -19,6 +19,7 @@ final class PopoverModel: ObservableObject {
     @Published var scanning = true
     @Published var launchAtLogin = false
     @Published var loginError: String?
+    @Published var competitors: [RunningCompetitor] = []
     @Published var highlight = PopoverHighlight()
     var toggleApp: ((String) -> Void)?
     var setRevealSeconds: ((Double) -> Void)?
@@ -80,6 +81,18 @@ struct PopoverView: View {
                 .padding(.horizontal, edge)
                 .padding(.top, 8)
                 .padding(.bottom, 5)
+            if let competitor = model.competitors.first {
+                HStack(alignment: .top, spacing: 5) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .accessibilityHidden(true)
+                    Text("\(competitor.name) is also hiding menu bar icons. Quit one of them; both at once can hide the wrong icons.")
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, edge).padding(.bottom, 6)
+                .accessibilityElement(children: .combine)
+            }
             if !model.trusted {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Allow Accessibility access so SMH can find apps with menu bar icons.")

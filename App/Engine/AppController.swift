@@ -15,6 +15,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     private let scanner = MenuBarScanner()
     private var trustTimer: Timer?
     private var firstLaunch = false
+    private var settingsNote = ""
     private(set) var settings = Settings()
     private(set) var state: BarState = .expanded
     private var revealTimer: Timer?
@@ -26,13 +27,11 @@ final class AppController: NSObject, NSApplicationDelegate {
     #endif
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        switch store.load() {
-        case .loaded(let value): settings = value
-        case .missing: settings = Settings(); firstLaunch = true
-        case .corrupt(let fallback, let reason):
-            settings = fallback
-            logger.error("settings corrupt: \(reason, privacy: .public)")
-        }
+        let recovered = SettingsRecovery.load(store: store)
+        settings = recovered.settings
+        firstLaunch = recovered.firstLaunch
+        settingsNote = recovered.note
+        if !settingsNote.isEmpty { logger.error("settings corrupt: \(self.settingsNote, privacy: .public)") }
         status.onEvent = { [weak self] event in
             self?.receive(event)
         }
@@ -45,6 +44,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         popoverModel.openAccessibilitySettings = { [weak self] in self?.openAccessibilitySettings() }
         popoverModel.quit = { [weak self] in self?.quit() }
         syncPopover()
+        updateCompetitors()
         popoverModel.trusted = AXIsProcessTrusted()
         // Launch and terminate notifications skip agent (LSUIElement) apps, which most menu bar apps are.
         // Observing runningApplications sees every app.
@@ -60,7 +60,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         #if DEBUG
         debugChannel = DebugChannel(controller: self)
         #endif
-        receive(.launched(shimAvailable: SMHMenuBarShim.isAvailable(),
+        receive(.launched(shimAvailable: shimAvailableAtLaunch(),
                           inApplications: Bundle.main.bundlePath.hasPrefix("/Applications/"), now: Date()))
         scanApps()
         trustTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -82,6 +82,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     private func runningAppsChanged(_ change: RunningAppsChange) {
+        updateCompetitors()
         if change.isEmpty { return }
         logger.info("running apps changed: \(change.launched.count) launched, \(change.terminated.count) terminated")
         appChangeTimer?.invalidate()
@@ -94,6 +95,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     @objc private func workspaceChanged(_ notification: Notification) {
+        updateCompetitors()
         receive(.runningAppsChanged)
         scanApps()
     }
@@ -254,6 +256,22 @@ final class AppController: NSObject, NSApplicationDelegate {
         Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
     }
 
+    private func updateCompetitors() {
+        popoverModel.competitors = ConflictDetector.detect(
+            NSWorkspace.shared.runningApplications.compactMap { app in
+                guard let id = app.bundleIdentifier else { return nil }
+                return (id, app.localizedName ?? id)
+            })
+        status.updatePopoverSize()
+    }
+
+    private func shimAvailableAtLaunch() -> Bool {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["SMH_DEBUG_FORCE_SHIM_MISSING"] == "1" { return false }
+        #endif
+        return SMHMenuBarShim.isAvailable()
+    }
+
     private func syncPopover() {
         popoverModel.running = Self.runningBundleIDs()
         popoverModel.hidden = settings.hidden
@@ -279,6 +297,9 @@ final class AppController: NSObject, NSApplicationDelegate {
         }
         return ["state": stateString, "hidden": settings.hidden.sorted().joined(separator: ","),
                 "allowCount": String(engine.allowCount), "applied": engine.isApplied ? "yes" : "no",
+                "applyCount": String(engine.applyCount),
+                "conflict": popoverModel.competitors.map(\.bundleID).joined(separator: ","),
+                "settingsNote": settingsNote,
                 "popover": status.isOpen ? "open" : "closed", "trusted": AXIsProcessTrusted() ? "yes" : "no"]
     }
 
