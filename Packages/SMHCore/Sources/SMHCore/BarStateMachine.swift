@@ -18,10 +18,17 @@ public enum BarEvent: Equatable, Sendable {
     /// Paused: the bar shows every icon. Not paused: the bar hides the set, or shows all if the set is empty.
     case pauseToggled(now: Date)
     case applyFailed(String), quitRequested
+    /// Wake, a display change or a MenuBarAgent restart. While collapsed this forces a real apply,
+    /// because the system may have dropped the assertion even though the list did not change.
+    case systemChanged
+    /// The retry timer fired after an apply failed.
+    case retryApply
 }
 
 public enum BarAction: Equatable, Sendable {
     case applyAllowList, release, scheduleRevealTimer(at: Date), cancelRevealTimer, showWarning(Reason)
+    /// Like applyAllowList, but applies even when the same list is already active.
+    case reapplyAllowList
 }
 
 public struct BarContext: Sendable {
@@ -58,7 +65,15 @@ public enum BarStateMachine {
             return settle(state, context)
         }
 
-        if case .unavailable = state { return (state, []) }
+        if case .unavailable(let reason) = state {
+            // A failed apply can recover: a retry, Resume or a row toggle tries again.
+            // A missing shim or a copy outside /Applications cannot, so those ignore everything else.
+            guard case .applyFailed = reason else { return (state, []) }
+            switch event {
+            case .retryApply, .pauseToggled, .hiddenSetChanged: return settle(state, context)
+            default: return (state, [])
+            }
+        }
 
         switch event {
         case .revealClicked(let now):
@@ -71,7 +86,9 @@ public enum BarStateMachine {
             default: return (state, [])
             }
         case .revealTimerFired(let now):
-            if case .revealing(let until) = state, now >= until, until != menuHeldUntil {
+            if case .revealing(let until) = state, until != menuHeldUntil {
+                // Early, for example because the wall clock moved back: wait for the deadline again.
+                if now < until { return (state, [.scheduleRevealTimer(at: until)]) }
                 // The icons are already shown, so there is nothing to release.
                 if context.paused || context.hiddenIsEmpty { return (.expanded, []) }
                 return (.collapsed, [.applyAllowList])
@@ -89,6 +106,9 @@ public enum BarStateMachine {
         case .runningAppsChanged:
             if case .collapsed = state { return (state, [.applyAllowList]) }
             return (state, [])
+        case .systemChanged:
+            if case .collapsed = state { return (state, [.reapplyAllowList]) }
+            return (state, [])
         case .hiddenSetChanged:
             if case .revealing = state {
                 // The icons are already shown, so only the timer needs to stop.
@@ -102,7 +122,7 @@ public enum BarStateMachine {
             let reason = Reason.applyFailed(message)
             let actions: [BarAction] = state.isRevealing ? [.cancelRevealTimer, .release, .showWarning(reason)] : [.release, .showWarning(reason)]
             return (.unavailable(reason), actions)
-        case .launched, .quitRequested: return (state, [])
+        case .launched, .quitRequested, .retryApply: return (state, [])
         }
     }
 

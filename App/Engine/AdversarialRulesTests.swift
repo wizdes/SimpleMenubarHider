@@ -6,11 +6,14 @@
 //     App/Engine/ConflictDetector.swift App/Engine/ApplyCounter.swift App/Engine/SettingsRecovery.swift \
 //     App/Engine/AdversarialRulesTests.swift -o $DIR/adversarial-rules-tests
 //   DYLD_LIBRARY_PATH=$DIR $DIR/adversarial-rules-tests
+// Run it twice: once as above (Release rules) and once with -D DEBUG added (Debug rules).
 import Foundation
 import SMHCore
 
 @main
 struct AdversarialRulesTests {
+    nonisolated(unsafe) static var checks = 0
+
     static func main() {
         let matches = ConflictDetector.detect([
             ("com.example.other", "Other"),
@@ -22,9 +25,17 @@ struct AdversarialRulesTests {
             ("dev.yili.smh.fixture.competitor", "Fixture"),
             ("com.jordanbaird.Ice", "Ice")
         ])
-        expect(matches.map(\.bundleID), ["com.dwarvesv.minimalbar", "com.jordanbaird.Ice",
-                                        "com.stonerl.Thaw", "com.surteesstudios.Bartender",
-                                        "com.surteesstudios.Bartender-setapp", "dev.yili.smh.fixture.competitor"], "all competitors, sorted and deduplicated")
+        var competitors = ["com.dwarvesv.minimalbar", "com.jordanbaird.Ice",
+                           "com.stonerl.Thaw", "com.surteesstudios.Bartender",
+                           "com.surteesstudios.Bartender-setapp"]
+        #if DEBUG
+        // M4 review item 5: the test fixture counts as a competitor only in Debug builds.
+        competitors.append("dev.yili.smh.fixture.competitor")
+        expect(ConflictDetector.bundleIDs.contains("dev.yili.smh.fixture.competitor"), true, "Debug list has the fixture")
+        #else
+        expect(ConflictDetector.bundleIDs.contains("dev.yili.smh.fixture.competitor"), false, "Release list has no fixture")
+        #endif
+        expect(matches.map(\.bundleID), competitors, "all competitors, sorted and deduplicated")
         expect(matches.first?.name, "Hidden Bar", "localized running name")
         expect(ConflictDetector.detect([("com.example.other", "Other")]).isEmpty, true, "other apps ignored")
 
@@ -36,17 +47,43 @@ struct AdversarialRulesTests {
         let backing = InMemoryStore()
         let store = SettingsStore(store: backing)
         backing.set(Data("bad json".utf8), forKey: SettingsStore.key)
-        let recovered = SettingsRecovery.load(store: store)
+        var backedUp: [Data] = []
+        let backup: (Data) throws -> URL = { data in
+            backedUp.append(data)
+            return URL(fileURLWithPath: "/tmp/settings-corrupt-test.json")
+        }
+        let recovered = SettingsRecovery.load(store: store, backup: backup)
         expect(recovered.settings, Settings(), "corrupt settings use defaults")
         expect(recovered.note.isEmpty, false, "corrupt reason is exposed")
         expect(store.load(), .loaded(Settings()), "defaults overwrite bad bytes")
-        let second = SettingsRecovery.load(store: store)
+        let second = SettingsRecovery.load(store: store, backup: backup)
         expect(second.note, "", "next launch has no corruption note")
         expect(second.firstLaunch, false, "recovered settings are not a new install")
-        print("9/9 checks passed")
+
+        // M4 review item 11: the bad bytes are copied aside before they are overwritten.
+        expect(backedUp, [Data("bad json".utf8)], "the backup gets the exact bad bytes, once")
+        expect(recovered.backupURL?.lastPathComponent, "settings-corrupt-test.json", "backup location is reported")
+        expect(recovered.backupError, nil, "no backup error")
+        backing.set(Data("bad json".utf8), forKey: SettingsStore.key)
+        let failedBackup = SettingsRecovery.load(store: store) { _ in
+            throw NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "disk full"])
+        }
+        expect(failedBackup.backupError, "disk full", "a failed backup is reported, not hidden")
+        expect(store.load(), .loaded(Settings()), "the reset still happens when the copy failed")
+
+        // M4 review item 9: never-hide ids are dropped on load and the cleaned set is saved.
+        store.save(Settings(hidden: ["com.apple.controlcenter", "dev.example.app"], revealSeconds: 30))
+        let cleaned = SettingsRecovery.load(store: store, backup: backup)
+        expect(cleaned.settings.hidden, ["dev.example.app"], "neverHide ids dropped")
+        expect(cleaned.droppedNeverHide, ["com.apple.controlcenter"], "dropped ids are reported for one log line")
+        expect(cleaned.settings.revealSeconds, 30, "other settings kept")
+        expect(store.load(), .loaded(cleaned.settings), "the cleaned set is saved, so the log happens once")
+        expect(SettingsRecovery.load(store: store, backup: backup).droppedNeverHide, [], "nothing to drop next time")
+        print("\(checks)/\(checks) checks passed")
     }
 
     static func expect<T: Equatable>(_ actual: T, _ expected: T, _ context: String) {
+        checks += 1
         guard actual == expected else {
             fputs("FAIL \(context): got \(actual), expected \(expected)\n", stderr)
             exit(1)

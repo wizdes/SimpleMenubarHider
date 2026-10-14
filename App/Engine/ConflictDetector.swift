@@ -5,10 +5,17 @@ struct RunningCompetitor: Equatable, Sendable {
 }
 
 enum ConflictDetector {
-    static let bundleIDs: Set<String> = [
+    #if DEBUG
+    /// Debug builds also treat the test fixture as a competitor, for scripts/adversarial.sh.
+    static let bundleIDs: Set<String> = releaseBundleIDs.union(["dev.yili.smh.fixture.competitor"])
+    #else
+    static let bundleIDs: Set<String> = releaseBundleIDs
+    #endif
+
+    private static let releaseBundleIDs: Set<String> = [
         "com.stonerl.Thaw", "com.jordanbaird.Ice",
         "com.surteesstudios.Bartender", "com.surteesstudios.Bartender-setapp",
-        "com.dwarvesv.minimalbar", "dev.yili.smh.fixture.competitor"
+        "com.dwarvesv.minimalbar"
     ]
 
     static func detect(_ apps: [(String, String)]) -> [RunningCompetitor] {

@@ -55,7 +55,8 @@ func hiddenSetChanges(_ row: Transition) { row.check() }
     Transition("revealing, timer due, hidden empty", .revealing(until: due), .revealTimerFired(now: due), empty, .expanded, []),
     Transition("revealing, timer due, paused", .revealing(until: due), .revealTimerFired(now: due), paused, .expanded, []),
     Transition("revealing, timer due, active", .revealing(until: due), .revealTimerFired(now: due), active, .collapsed, [.applyAllowList]),
-    Transition("revealing, timer early", .revealing(until: due), .revealTimerFired(now: start), active, .revealing(until: due), []),
+    // M4 review item 10: an early fire (the wall clock moved back) schedules the timer again.
+    Transition("revealing, timer early", .revealing(until: due), .revealTimerFired(now: start), active, .revealing(until: due), [.scheduleRevealTimer(at: due)]),
     Transition("revealing, set cleared", .revealing(until: due), .hiddenSetChanged, empty, .expanded, [.cancelRevealTimer]),
     Transition("revealing, set changed, active", .revealing(until: due), .hiddenSetChanged, active, .revealing(until: due), []),
 ])
@@ -91,7 +92,8 @@ func launches(_ row: Transition) { row.check() }
     Transition("expanded, pause off", .expanded, .pauseToggled(now: start), active, .collapsed, [.applyAllowList]),
     Transition("expanded, pause off, hidden empty", .expanded, .pauseToggled(now: start), empty, .expanded, []),
     Transition("collapsed, pause off", .collapsed, .pauseToggled(now: start), active, .collapsed, [.applyAllowList]),
-    Transition("unavailable, pause on", failed, .pauseToggled(now: start), paused, failed, []),
+    // M4 review item 4: a failed apply recovers, so pausing settles to expanded (nothing is applied).
+    Transition("unavailable, pause on", failed, .pauseToggled(now: start), paused, .expanded, []),
 ])
 func pauseToggles(_ row: Transition) { row.check() }
 
@@ -132,11 +134,17 @@ func applyFailures(_ row: Transition) { row.check() }
 func quits(_ row: Transition) { row.check() }
 
 // Bug 5: unavailable ignores every event except launch and quit.
+// M4 review item 4: a failed apply now also recovers on Resume and on a row toggle
+// (see applyFailedRecovers in ReviewFixTests.swift); the two terminal reasons still ignore both.
 @Test(arguments: [
     BarEvent.revealClicked(now: start), .revealTimerFired(now: due), .menuOpened, .menuClosed(now: start),
     .runningAppsChanged, .hiddenSetChanged, .pauseToggled(now: start),
 ])
 func unavailableIgnoresOtherEvents(_ event: BarEvent) {
+    for terminal in [BarState.unavailable(warning), .unavailable(.notInApplications)] {
+        #expect(BarStateMachine.reduce(terminal, event, active) == (terminal, []))
+    }
+    if event == .hiddenSetChanged || event == .pauseToggled(now: start) { return }
     #expect(BarStateMachine.reduce(failed, event, active) == (failed, []))
 }
 

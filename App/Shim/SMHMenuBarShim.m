@@ -49,8 +49,17 @@ static NSError *SMHError(NSInteger code, NSString *message) {
     }
 }
 
-- (void)finishGeneration:(NSUInteger)generation error:(NSError * _Nullable)error {
-    if (generation != self.generation || !self.pendingCompletion) return;
+- (void)finishGeneration:(NSUInteger)generation assertion:(id _Nullable)finished error:(NSError * _Nullable)error {
+    if (generation != self.generation || !self.pendingCompletion || finished != self.pendingAssertion) {
+        // This activation was superseded, released or timed out, and its completion already ran.
+        // If it still succeeded, nothing owns the assertion, so end it now.
+        if (!error && finished && finished != self.activeAssertion) {
+            NSLog(@"SMHShim late activation success for old generation %lu (current %lu); invalidating it",
+                  (unsigned long)generation, (unsigned long)self.generation);
+            [self invalidate:finished];
+        }
+        return;
+    }
     id assertion = self.pendingAssertion;
     void (^completion)(NSError * _Nullable) = self.pendingCompletion;
     self.pendingAssertion = nil;
@@ -110,14 +119,15 @@ static NSError *SMHError(NSInteger code, NSString *message) {
         self.pendingCompletion = [completion copy];
         NSUInteger generation = self.generation;
         ((void (*)(id, SEL, id, id))objc_msgSend)(assertion, activateSelector, configuration, ^(NSError *error) {
-            dispatch_async(dispatch_get_main_queue(), ^{ [self finishGeneration:generation error:error]; });
+            dispatch_async(dispatch_get_main_queue(), ^{ [self finishGeneration:generation assertion:assertion error:error]; });
         });
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self finishGeneration:generation error:SMHError(3, @"activation timed out after 5 seconds")];
+            [self finishGeneration:generation assertion:assertion error:SMHError(3, @"activation timed out after 5 seconds")];
         });
     } @catch (NSException *exception) {
         if (self.pendingCompletion) {
-            [self finishGeneration:self.generation error:SMHError(1, exception.reason ?: @"MenuBarClientCore exception")];
+            [self finishGeneration:self.generation assertion:self.pendingAssertion
+                             error:SMHError(1, exception.reason ?: @"MenuBarClientCore exception")];
         } else {
             [self invalidate:assertion];
             completion(SMHError(1, exception.reason ?: @"MenuBarClientCore exception"));

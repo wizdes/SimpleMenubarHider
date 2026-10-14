@@ -15,9 +15,13 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private var panel: FallbackPanel?
     private var content: NSHostingController<PopoverView>?
     private var keyMonitor: Any?
+    private var panelClickMonitor: Any?
+    private var resignObserver: NSObjectProtocol?
+    private var sizeThrottle = SizeUpdateThrottle()
     private let model: PopoverModel
     var onEvent: ((BarEvent) -> Void)?
     var onOpen: (() -> Void)?
+    var onClose: (() -> Void)?
     var onQuit: (() -> Void)?
     var isOpen: Bool { popover.isShown || panel?.isVisible == true }
 
@@ -92,10 +96,43 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         panel.level = .popUpMenu
         panel.makeKeyAndOrderFront(nil)
         self.panel = panel
+        installPanelMonitors()
         onEvent?(.menuOpened)
     }
 
+    /// The fallback panel closes like a menu: on a click outside it and when SMH stops being active.
+    /// Escape is handled by the key monitor.
+    private func installPanelMonitors() {
+        removePanelMonitors()
+        // Global monitors see only clicks that go to other apps, so clicks inside the panel never close it.
+        panelClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] _ in
+            MainActor.assumeIsolated { self?.closePanel(reason: "click outside") }
+        }
+        resignObserver = NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification,
+                                                                object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.closePanel(reason: "app resigned active") }
+        }
+    }
+
+    private func removePanelMonitors() {
+        if let panelClickMonitor { NSEvent.removeMonitor(panelClickMonitor) }
+        panelClickMonitor = nil
+        if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
+        resignObserver = nil
+    }
+
+    /// Coalesces size updates: a burst of model changes rebuilds the measuring view at most once per 0.2 s.
     func updatePopoverSize() {
+        guard isOpen, content != nil else { return }
+        guard let delay = sizeThrottle.request(now: ProcessInfo.processInfo.systemUptime) else { return }
+        let timer = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.applyPopoverSize() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func applyPopoverSize() {
+        sizeThrottle.ran(now: ProcessInfo.processInfo.systemUptime)
         guard isOpen, let content else { return }
         let size = fittingSize()
         content.preferredContentSize = size
@@ -125,6 +162,10 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
                   event.modifierFlags.intersection([.command, .control, .option]).isEmpty else { return event }
             let key: PopoverKey
             switch event.keyCode {
+            case 53 where self.panel != nil:
+                // NSPopover closes itself on Escape; the fallback panel needs it here.
+                self.closePanel(reason: "Escape")
+                return nil
             case 126: key = .up
             case 125: key = .down
             case 49: key = .space
@@ -142,18 +183,25 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
     func closePopover() {
         if popover.isShown { popover.close() }
-        if let panel {
-            panel.close()
-            self.panel = nil
-            removeKeyMonitor()
-            content = nil
-            onEvent?(.menuClosed(now: Date()))
-        }
+        closePanel(reason: "close request")
+    }
+
+    private func closePanel(reason: String) {
+        guard let panel else { return }
+        logger.info("closing fallback panel: \(reason, privacy: .public)")
+        panel.close()
+        self.panel = nil
+        removePanelMonitors()
+        removeKeyMonitor()
+        content = nil
+        onClose?()
+        onEvent?(.menuClosed(now: Date()))
     }
 
     func popoverDidClose(_ notification: Notification) {
         removeKeyMonitor()
         content = nil
+        onClose?()
         onEvent?(.menuClosed(now: Date()))
     }
 

@@ -20,7 +20,15 @@ final class PopoverModel: ObservableObject {
     @Published var launchAtLogin = false
     @Published var loginError: String?
     @Published var competitors: [RunningCompetitor] = []
+    /// SMH paused itself because a competing hider runs. `paused` stays the user's own choice.
+    @Published var pausedForConflict = false
+    /// The one-time "settings were reset" line, or nil.
+    @Published var settingsResetLine: String?
     @Published var highlight = PopoverHighlight()
+    /// Where the Hide Again After menu pops up. Only a view inside a window registers, so the
+    /// off-screen copy that measures the popover size cannot take it over.
+    let delayAnchor = MenuAnchor()
+    private var openMouseLocation: NSPoint?
     var toggleApp: ((String) -> Void)?
     var setRevealSeconds: ((Double) -> Void)?
     var setPaused: ((Bool) -> Void)?
@@ -33,7 +41,7 @@ final class PopoverModel: ObservableObject {
     }
 
     var footerVisible: Bool {
-        guard !hidden.isEmpty && !paused else { return false }
+        guard !hidden.isEmpty && !paused && !pausedForConflict else { return false }
         if case .unavailable = state { return false }
         return true
     }
@@ -57,19 +65,68 @@ final class PopoverModel: ObservableObject {
         return PopoverLayout.width(widestText: widest)
     }
 
-    func popoverOpened() { highlight.popoverOpened() }
+    var showsAppRows: Bool { PopoverRows.showsAppRows(trusted: trusted, scanning: scanning, scannedIsEmpty: apps.isEmpty) }
+
+    /// The rows the keys act on: app rows only when they are on screen, then the general rows.
+    var keyboardRows: [String] {
+        PopoverRows.keyboardRows(apps: rows.map(\.bundleID), trusted: trusted, scanning: scanning, scannedIsEmpty: apps.isEmpty)
+    }
+
+    func popoverOpened() {
+        highlight.popoverOpened()
+        openMouseLocation = NSEvent.mouseLocation
+    }
 
     /// Returns true when the key belongs to the popover list, so the caller swallows it.
     func handleKey(_ key: PopoverKey) -> Bool {
-        if case .toggle(let id) = highlight.handle(key, rows: rows.map(\.bundleID)) { toggleApp?(id) }
+        var next = highlight
+        let result = next.handle(key, rows: keyboardRows)
+        if next != highlight { highlight = next }
+        if case .toggle(let id) = result {
+            if let row = GeneralRow(rawValue: id) { activate(row) } else { toggleApp?(id) }
+        }
         return true
+    }
+
+    func activate(_ row: GeneralRow) {
+        switch row {
+        case .delay: showDelayMenu()
+        case .launchAtLogin: setLaunchAtLogin?(!launchAtLogin)
+        case .pause: setPaused?(!paused)
+        case .quit: quit?()
+        }
+    }
+
+    /// SwiftUI reports the pointer over a row also when the popover opens under a still pointer.
+    /// Only a pointer that moved since the popover opened highlights a row and arms the keys.
+    func pointer(_ phase: HoverPhase, over id: String) {
+        var next = highlight
+        switch phase {
+        case .active:
+            next.pointerEntered(id)
+            if NSEvent.mouseLocation != openMouseLocation { next.pointerMoved() }
+        case .ended:
+            next.pointerExited(id)
+        }
+        if next != highlight { highlight = next }
+    }
+
+    func isHighlighted(_ id: String) -> Bool { highlight.highlightedID == id }
+
+    func showDelayMenu() {
+        guard let view = delayAnchor.view else { return }
+        let menu = NSMenu()
+        for option in RevealDelayChoice.options {
+            let item = ClosureMenuItem(title: option.label) { [weak self] in self?.setRevealSeconds?(option.seconds) }
+            item.state = option.seconds == revealSeconds ? .on : .off
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: view.bounds.maxX, y: view.bounds.minY), in: view)
     }
 }
 
 struct PopoverView: View {
     @ObservedObject var model: PopoverModel
-    @State private var hoveredAction: String?
-    @State private var delayAnchor = MenuAnchor()
     private let rowHeight = PopoverLayout.rowHeight
     private let edge = PopoverLayout.rowInset + PopoverLayout.listInset
 
@@ -82,16 +139,10 @@ struct PopoverView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 5)
             if let competitor = model.competitors.first {
-                HStack(alignment: .top, spacing: 5) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .accessibilityHidden(true)
-                    Text("\(competitor.name) is also hiding menu bar icons. Quit one of them; both at once can hide the wrong icons.")
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, edge).padding(.bottom, 6)
-                .accessibilityElement(children: .combine)
+                noteLine(PopoverText.conflict(name: competitor.name))
+            }
+            if let line = model.settingsResetLine {
+                noteLine(line)
             }
             if !model.trusted {
                 VStack(alignment: .leading, spacing: 6) {
@@ -110,7 +161,7 @@ struct PopoverView: View {
                         .padding(.horizontal, edge).padding(.bottom, 6)
                 }
                 let rows = model.rows
-                if model.scanning && model.apps.isEmpty {
+                if !model.showsAppRows {
                     HStack(spacing: 7) { ProgressView().controlSize(.small); Text("Finding apps…") }
                         .font(.system(size: 13)).padding(.horizontal, edge).padding(.vertical, 8)
                 } else if rows.isEmpty {
@@ -131,24 +182,22 @@ struct PopoverView: View {
                         }
                         .frame(height: CGFloat(min(rows.count, PopoverLayout.maxVisibleRows)) * rowHeight)
                         .onChange(of: model.highlight.highlightedID) { _, id in
-                            if let id { proxy.scrollTo(id) }
+                            if let id, GeneralRow(rawValue: id) == nil { proxy.scrollTo(id) }
                         }
                     }
                 }
             }
             Divider().padding(.vertical, 5)
             delayRow
-            actionRow(PopoverModel.actionTitles[0], checked: model.launchAtLogin) {
-                model.setLaunchAtLogin?(!model.launchAtLogin)
-            }
+            actionRow(.launchAtLogin, PopoverModel.actionTitles[0], checked: model.launchAtLogin)
             if let error = model.loginError {
                 Text(error).font(.system(size: 11)).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, edge).padding(.bottom, 4)
             }
-            actionRow(PopoverModel.actionTitles[1], checked: model.paused) { model.setPaused?(!model.paused) }
+            actionRow(.pause, PopoverModel.actionTitles[1], checked: model.paused)
             Divider().padding(.vertical, 5)
-            actionRow(PopoverModel.actionTitles[2], checked: false) { model.quit?() }
+            actionRow(.quit, PopoverModel.actionTitles[2], checked: false)
             if model.footerVisible {
                 Text("The Focus (moon) icon also hides while hiding is on. This is a macOS limit.")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
@@ -161,6 +210,19 @@ struct PopoverView: View {
         .frame(width: model.contentWidth, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
         .background(.regularMaterial)
+    }
+
+    private func noteLine(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 5) {
+            Image(systemName: "exclamationmark.triangle")
+                .accessibilityHidden(true)
+            Text(text)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .font(.system(size: 11))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, edge).padding(.bottom, 6)
+        .accessibilityElement(children: .combine)
     }
 
     private var warningText: String? {
@@ -177,7 +239,7 @@ struct PopoverView: View {
 
     private func appRow(_ row: PopoverRow) -> some View {
         let checked = model.hidden.contains(row.bundleID)
-        let selected = model.highlight.highlightedID == row.bundleID
+        let selected = model.isHighlighted(row.bundleID)
         return Button {
             model.toggleApp?(row.bundleID)
         } label: {
@@ -204,9 +266,7 @@ struct PopoverView: View {
         }
         .buttonStyle(.plain)
         .focusable(false)
-        .onHover { inside in
-            if inside { model.highlight.hoverBegan(row.bundleID) } else { model.highlight.hoverEnded(row.bundleID) }
-        }
+        .onContinuousHover { phase in model.pointer(phase, over: row.bundleID) }
         .accessibilityRepresentation {
             Toggle(row.isRunning ? row.name : "\(row.name), not running", isOn: Binding(
                 get: { model.hidden.contains(row.bundleID) },
@@ -215,29 +275,30 @@ struct PopoverView: View {
         }
     }
 
-    private func menuRow(_ title: String, trailing: String? = nil, checked: Bool = false) -> some View {
-        HStack(spacing: 0) {
+    private func menuRow(_ row: GeneralRow, _ title: String, trailing: String? = nil, checked: Bool = false) -> some View {
+        let selected = model.isHighlighted(row.rawValue)
+        return HStack(spacing: 0) {
             Text(checked ? "✓" : " ").frame(width: PopoverLayout.checkColumn, alignment: .leading)
             Text(title).lineLimit(1)
             Spacer(minLength: 16)
             if let trailing {
                 Text(trailing).lineLimit(1)
-                    .foregroundStyle(hoveredAction == title ? Color.white : Color.secondary)
+                    .foregroundStyle(selected ? Color.white : Color.secondary)
             }
         }
         .font(.system(size: 13))
         .padding(.horizontal, PopoverLayout.rowInset)
         .frame(height: rowHeight)
         .contentShape(Rectangle())
-        .background(hoveredAction == title ? Color.accentColor : .clear, in: RoundedRectangle(cornerRadius: 5))
-        .foregroundStyle(hoveredAction == title ? .white : .primary)
+        .background(selected ? Color.accentColor : .clear, in: RoundedRectangle(cornerRadius: 5))
+        .foregroundStyle(selected ? .white : .primary)
     }
 
-    private func actionRow(_ title: String, checked: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) { menuRow(title, checked: checked) }
+    private func actionRow(_ row: GeneralRow, _ title: String, checked: Bool) -> some View {
+        Button { model.activate(row) } label: { menuRow(row, title, checked: checked) }
             .buttonStyle(.plain)
             .focusable(false)
-            .onHover { inside in hoveredAction = inside ? title : nil }
+            .onContinuousHover { phase in model.pointer(phase, over: row.rawValue) }
             .padding(.horizontal, PopoverLayout.listInset)
             .accessibilityLabel(title)
             .accessibilityValue(checked ? "checked" : "unchecked")
@@ -245,28 +306,20 @@ struct PopoverView: View {
 
     /// A plain row; clicking it pops up a native menu of delays at the row's right edge.
     private var delayRow: some View {
-        Button { showDelayMenu() } label: {
-            menuRow(PopoverModel.delayTitle, trailing: model.delayTrailing)
-                .background(MenuAnchorView(anchor: delayAnchor))
+        Button {
+            model.showDelayMenu()
+            // The pointer may have left while the menu tracked, without a hover end.
+            model.pointer(.ended, over: GeneralRow.delay.rawValue)
+        } label: {
+            menuRow(.delay, PopoverModel.delayTitle, trailing: model.delayTrailing)
+                .background(MenuAnchorView(anchor: model.delayAnchor))
         }
         .buttonStyle(.plain)
         .focusable(false)
-        .onHover { inside in hoveredAction = inside ? PopoverModel.delayTitle : nil }
+        .onContinuousHover { phase in model.pointer(phase, over: GeneralRow.delay.rawValue) }
         .padding(.horizontal, PopoverLayout.listInset)
         .accessibilityLabel(PopoverModel.delayTitle)
         .accessibilityValue(RevealDelayChoice.label(for: model.revealSeconds))
-    }
-
-    private func showDelayMenu() {
-        guard let view = delayAnchor.view else { return }
-        let menu = NSMenu()
-        for option in RevealDelayChoice.options {
-            let item = ClosureMenuItem(title: option.label) { [model] in model.setRevealSeconds?(option.seconds) }
-            item.state = option.seconds == model.revealSeconds ? .on : .off
-            menu.addItem(item)
-        }
-        menu.popUp(positioning: nil, at: NSPoint(x: view.bounds.maxX, y: view.bounds.minY), in: view)
-        hoveredAction = nil
     }
 }
 
@@ -276,20 +329,29 @@ final class MenuAnchor {
     weak var view: NSView?
 }
 
-private final class FlippedView: NSView {
+private final class AnchorView: NSView {
+    weak var anchor: MenuAnchor?
     override var isFlipped: Bool { true }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil { anchor?.view = self }
+    }
 }
 
 private struct MenuAnchorView: NSViewRepresentable {
     let anchor: MenuAnchor
 
-    func makeNSView(context: Context) -> NSView {
-        let view = FlippedView()
-        anchor.view = view
+    func makeNSView(context: Context) -> AnchorView {
+        let view = AnchorView()
+        view.anchor = anchor
         return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) { anchor.view = nsView }
+    func updateNSView(_ nsView: AnchorView, context: Context) {
+        nsView.anchor = anchor
+        if nsView.window != nil { anchor.view = nsView }
+    }
 }
 
 private final class ClosureMenuItem: NSMenuItem {

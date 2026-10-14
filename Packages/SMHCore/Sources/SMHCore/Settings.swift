@@ -29,13 +29,25 @@ public struct Settings: Codable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        // Only `hidden` is required. A missing optional key takes its default instead of making
+        // the whole file "corrupt"; a key that is present with the wrong type still fails.
+        let defaults = Settings()
         self.init(
             hidden: try values.decode(Set<String>.self, forKey: .hidden),
-            revealSeconds: try values.decode(Double.self, forKey: .revealSeconds),
-            paused: try values.decode(Bool.self, forKey: .paused),
+            revealSeconds: try values.decodeIfPresent(Double.self, forKey: .revealSeconds) ?? defaults.revealSeconds,
+            paused: try values.decodeIfPresent(Bool.self, forKey: .paused) ?? defaults.paused,
             names: try values.decodeIfPresent([String: String].self, forKey: .names) ?? [:],
-            schemaVersion: try values.decode(Int.self, forKey: .schemaVersion)
+            schemaVersion: try values.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? defaults.schemaVersion
         )
+    }
+
+    /// Drops ids SMH never hides. An older build could save them, and with no row to untick
+    /// they would keep SMH collapsed for good.
+    public func removingNeverHide() -> (settings: Settings, dropped: [String]) {
+        var clean = self
+        let dropped = hidden.intersection(AllowList.neverHide)
+        clean.hidden.subtract(dropped)
+        return (clean, dropped.sorted())
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -78,6 +90,9 @@ public final class SettingsStore: Sendable {
         catch { return .corrupt(Settings(), reason: String(describing: error)) }
     }
 
+    /// The raw stored bytes, so corrupt settings can be copied aside before they are overwritten.
+    public func storedData() -> Data? { store.data(forKey: Self.key) }
+
     public func save(_ settings: Settings) {
         do { store.set(try JSONEncoder().encode(settings), forKey: Self.key) }
         catch { assertionFailure("Failed to encode Settings: \(error)") }
@@ -103,14 +118,43 @@ public final class InMemoryStore: KeyValueStore, @unchecked Sendable {
     }
 }
 
-/// UserDefaults provides synchronized access to its values; the suite reference is fixed after init.
+/// UserDefaults provides synchronized access to its values; the defaults reference is fixed after init.
+/// The app passes `UserDefaults.standard`, whose domain is the app's bundle id.
 public final class UserDefaultsStore: KeyValueStore, @unchecked Sendable {
     private let defaults: UserDefaults
 
-    public init(suiteName: String) {
-        self.defaults = UserDefaults(suiteName: suiteName) ?? .standard
+    public init(defaults: UserDefaults) {
+        self.defaults = defaults
     }
 
     public func data(forKey key: String) -> Data? { defaults.data(forKey: key) }
     public func set(_ data: Data?, forKey key: String) { defaults.set(data, forKey: key) }
+}
+
+/// Copies unreadable settings to a file before SMH replaces them with defaults.
+public enum SettingsBackup {
+    public static func fileName(for date: Date) -> String {
+        "settings-corrupt-\(timestamp(date)).json"
+    }
+
+    /// Writes `data` into `folder` (created if needed) and returns the file. Never overwrites an older copy.
+    public static func write(_ data: Data, to folder: URL, now: Date) throws -> URL {
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        var url = folder.appendingPathComponent(fileName(for: now))
+        var counter = 2
+        while FileManager.default.fileExists(atPath: url.path) {
+            url = folder.appendingPathComponent("settings-corrupt-\(timestamp(now))-\(counter).json")
+            counter += 1
+        }
+        try data.write(to: url, options: .withoutOverwriting)
+        return url
+    }
+
+    private static func timestamp(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
+        return formatter.string(from: date)
+    }
 }

@@ -91,7 +91,8 @@ private let active = BarContext(revealSeconds: 10, paused: false, hiddenIsEmpty:
 
 @Test func revealTimerChecks() {
     let until = now.addingTimeInterval(10)
-    #expect(BarStateMachine.reduce(.revealing(until: until), .revealTimerFired(now: now), active) == (.revealing(until: until), []))
+    // M4 review item 10: an early fire schedules the timer again for the same deadline.
+    #expect(BarStateMachine.reduce(.revealing(until: until), .revealTimerFired(now: now), active) == (.revealing(until: until), [.scheduleRevealTimer(at: until)]))
     #expect(BarStateMachine.reduce(.revealing(until: until), .revealTimerFired(now: until), active) == (.collapsed, [.applyAllowList]))
     #expect(BarStateMachine.reduce(.collapsed, .revealTimerFired(now: until), active) == (.collapsed, []))
 }

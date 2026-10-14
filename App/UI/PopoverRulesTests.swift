@@ -32,6 +32,12 @@ struct PopoverRulesTests {
         scanSkipsSystemApps()
         widthFitsWidestRow()
         revealDelayLabels()
+        keyboardRowsAreOnlyRowsOnScreen()
+        arrowsReachGeneralRows()
+        hoverAtOpenWithoutMovementDoesNotArm()
+        reopenOnlyAfterRecentUntrustedOpen()
+        sizeUpdatesAreCoalesced()
+        popoverLines()
         print("\(checks - failures)/\(checks) checks passed")
         exit(failures == 0 ? 0 : 1)
     }
@@ -127,6 +133,101 @@ struct PopoverRulesTests {
         expect(RevealDelayChoice.label(for: 10), "10 Seconds", "label for 10 s")
         expect(RevealDelayChoice.label(for: 3), "3 Seconds", "label for a value set by the debug channel")
         expect(RevealDelayChoice.label(for: 120), "2 Minutes", "label for whole minutes")
+    }
+
+    // M4 review item 6: keys act only on rows that are on screen.
+    static func keyboardRowsAreOnlyRowsOnScreen() {
+        let apps = ["com.example.a", "com.example.b"]
+        let general = GeneralRow.allCases.map(\.rawValue)
+        expect(PopoverRows.keyboardRows(apps: apps, trusted: false, scanning: false, scannedIsEmpty: false), general,
+               "untrusted: the app list is not shown, so only the general rows")
+        expect(PopoverRows.keyboardRows(apps: apps, trusted: true, scanning: true, scannedIsEmpty: true), general,
+               "first scan: the spinner is shown, so only the general rows (even with saved hidden apps)")
+        expect(PopoverRows.keyboardRows(apps: apps, trusted: true, scanning: true, scannedIsEmpty: false), apps + general,
+               "a rescan keeps the old rows on screen")
+        expect(PopoverRows.keyboardRows(apps: apps, trusted: true, scanning: false, scannedIsEmpty: true), apps + general,
+               "scan done")
+        expect(PopoverRows.showsAppRows(trusted: true, scanning: true, scannedIsEmpty: true), false, "spinner")
+        expect(PopoverRows.showsAppRows(trusted: false, scanning: false, scannedIsEmpty: false), false, "untrusted")
+
+        var highlight = PopoverHighlight()
+        highlight.popoverOpened()
+        highlight.hoverBegan("com.example.a")
+        let untrustedRows = PopoverRows.keyboardRows(apps: apps, trusted: false, scanning: false, scannedIsEmpty: false)
+        expect(highlight.handle(.space, rows: untrustedRows), .ignored, "a highlighted app row that is not on screen is not toggled")
+    }
+
+    // M4 review item 6: arrows go through the app rows, then Hide Again After, Launch at Login, Pause Hiding, Quit.
+    static func arrowsReachGeneralRows() {
+        let rows = PopoverRows.keyboardRows(apps: ["a"], trusted: true, scanning: false, scannedIsEmpty: false)
+        expect(rows, ["a", "smh.row.delay", "smh.row.login", "smh.row.pause", "smh.row.quit"], "row order")
+        var highlight = PopoverHighlight()
+        highlight.popoverOpened()
+        expect(highlight.handle(.returnKey, rows: rows), .ignored, "nothing happens before an arrow key")
+        var seen: [String?] = []
+        for _ in 0..<6 {
+            _ = highlight.handle(.down, rows: rows)
+            seen.append(highlight.highlightedID)
+        }
+        expect(seen, ["a", "smh.row.delay", "smh.row.login", "smh.row.pause", "smh.row.quit", "smh.row.quit"],
+               "Down walks every row and stops at Quit")
+        expect(highlight.handle(.space, rows: rows), .toggle("smh.row.quit"), "Space activates the highlighted general row")
+        expect(GeneralRow(rawValue: "smh.row.pause"), .pause, "the model maps the id back to the row")
+        expect(GeneralRow(rawValue: "a"), nil, "app ids are not general rows")
+    }
+
+    // M4 review item 6: the pointer resting on a row when the popover opens does not arm the keys.
+    static func hoverAtOpenWithoutMovementDoesNotArm() {
+        let rows = ["a", "b"]
+        var highlight = PopoverHighlight()
+        highlight.popoverOpened()
+        highlight.pointerEntered("a")
+        expect(highlight.highlightedID, nil, "no highlight from a pointer that has not moved")
+        expect(highlight.handle(.space, rows: rows), .ignored, "Space does nothing")
+        highlight.pointerMoved()
+        expect(highlight.highlightedID, "a", "the first real movement highlights the row under the pointer")
+        expect(highlight.handle(.space, rows: rows), .toggle("a"), "and arms the keys")
+        highlight.pointerExited("a")
+        highlight.pointerEntered("b")
+        expect(highlight.highlightedID, "b", "after movement, entering a row highlights it at once")
+
+        highlight.popoverOpened()
+        highlight.pointerEntered("b")
+        expect(highlight.handle(.returnKey, rows: rows), .ignored, "a new session starts unarmed again")
+        highlight.pointerExited("b")
+        highlight.pointerMoved()
+        expect(highlight.highlightedID, nil, "moving after leaving the row highlights nothing")
+        expect(highlight.handle(.returnKey, rows: rows), .ignored, "moving outside any row does not arm")
+    }
+
+    // M4 review item 7.
+    static func reopenOnlyAfterRecentUntrustedOpen() {
+        expect(TrustReopen.shouldReopen(openedUntrustedAt: nil, now: 1_000), false, "never opened while untrusted")
+        expect(TrustReopen.shouldReopen(openedUntrustedAt: 1_000, now: 1_100), true, "opened 100 s ago")
+        expect(TrustReopen.shouldReopen(openedUntrustedAt: 1_000, now: 1_300), true, "exactly 5 minutes")
+        expect(TrustReopen.shouldReopen(openedUntrustedAt: 1_000, now: 1_301), false, "more than 5 minutes ago")
+    }
+
+    // M4 review item 15: at most one size update per 0.2 s, and none while one is waiting.
+    static func sizeUpdatesAreCoalesced() {
+        var throttle = SizeUpdateThrottle()
+        expect(throttle.request(now: 10), 0, "the first request runs on the next turn")
+        expect(throttle.request(now: 10), nil, "a burst while one is waiting adds nothing")
+        throttle.ran(now: 10)
+        expect(throttle.request(now: 10.05).map { ($0 * 1000).rounded() }, 150, "the next one waits until 0.2 s after the last (ms)")
+        expect(throttle.request(now: 10.06), nil, "still waiting")
+        throttle.ran(now: 10.2)
+        expect(throttle.request(now: 11), 0, "a quiet gap runs at once")
+    }
+
+    // M4 review items 5 and 11.
+    static func popoverLines() {
+        expect(PopoverText.conflict(name: "Thaw"),
+               "Thaw is also hiding menu bar icons, so SMH has paused. Quit Thaw to use SMH.", "conflict line")
+        expect(PopoverText.settingsReset(backupError: nil),
+               "Settings could not be read and were reset. A copy was saved.", "reset line")
+        expect(PopoverText.settingsReset(backupError: "disk full"),
+               "Settings could not be read and were reset. The copy could not be saved: disk full", "reset line, no copy")
     }
 }
 #endif
