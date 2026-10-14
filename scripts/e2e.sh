@@ -205,7 +205,46 @@ step_a() {
   log "  1. Build the Debug SMH app and install it at: $SMH_APP"
   log "  2. bash scripts/build-fixtures.sh && bash scripts/install-fixtures.sh"
   log "  3. bash Tools/build-tools.sh"
-  exit 2
+  return 2
+}
+
+# --------------------------------------------------------------- step a2 ---
+step_a2() {
+  local t0 dt ok=1 pids="" reply="" rc=0
+  t0=$(now_ms)
+  pids="$(smh_pids)"
+  if [ -n "$pids" ]; then
+    reply="$("$SMHCTL" setHidden "" --timeout-ms 2000 2>&1)" || rc=$?
+    if [ "$rc" -ne 0 ] && { [ "$rc" -ne 3 ] || [ "$reply" != "TIMEOUT" ]; }; then
+      ok=0
+      log "  setHidden failed: $reply"
+    fi
+    "$SMHCTL" quit --timeout-ms 2000 >>"$RESULTS_FILE" 2>&1 || true
+    if ! wait_gone pattern "$SMH_PROC_PATTERN" 5; then
+      pids="$(smh_pids)"
+      if [ -n "$pids" ]; then
+        # shellcheck disable=SC2086
+        kill -TERM $pids 2>/dev/null || true
+      fi
+      if ! wait_gone pattern "$SMH_PROC_PATTERN" 5; then
+        pids="$(smh_pids)"
+        if [ -n "$pids" ]; then
+          # shellcheck disable=SC2086
+          kill -KILL $pids 2>/dev/null || true
+        fi
+        if ! wait_gone pattern "$SMH_PROC_PATTERN" 5; then ok=0; fi
+      fi
+    fi
+  fi
+  quit_bid "$ONE_BID"
+  quit_bid "$MANY_BID"
+  quit_bid "$WIDE_BID"
+  if ! wait_gone exact FixtureOne 5; then ok=0; fi
+  if ! wait_gone exact FixtureMany 5; then ok=0; fi
+  if ! wait_gone exact FixtureWide 5; then ok=0; fi
+  dt=$(( $(now_ms) - t0 ))
+  if [ "$ok" -eq 1 ]; then check_pass "a2 clean start" "$dt";
+  else check_fail "a2 clean start" "$dt" "SMH or fixtures did not cleanly stop"; fi
 }
 
 # ---------------------------------------------------------------- step b ---
@@ -362,8 +401,8 @@ step_h() {
   if [ "$ok" -eq 1 ]; then
     sleep 1 || true
     for i in 1 2 3 4 5 6; do
-      "$PROBE" visible --color "$MAGENTA" >>"$RESULTS_FILE" 2>&1
-      rc=$?
+      rc=0
+      "$PROBE" visible --color "$MAGENTA" >>"$RESULTS_FILE" 2>&1 || rc=$?
       if [ "$rc" -ne 1 ]; then ok=0; break; fi
       sleep 0.5 || true
     done
@@ -388,7 +427,7 @@ step_i() {
   if [ -z "$pids" ]; then
     ok=0
   else
-    pid="$(printf '%s\n' "$pids" | head -n 1)"
+    pid="$(printf '%s\n' "$pids" | head -n 1 || true)"
     # A kill never counts as success: the probe verdicts below decide.
     kill -TERM "$pid" 2>/dev/null || true
   fi
@@ -432,7 +471,7 @@ step_j() {
   if [ -z "$pids" ]; then
     ok=0
   else
-    pid="$(printf '%s\n' "$pids" | head -n 1)"
+    pid="$(printf '%s\n' "$pids" | head -n 1 || true)"
     kill -KILL "$pid" 2>/dev/null || true
   fi
   if ! "$PROBE" wait --color "$MAGENTA" --want visible --timeout-ms 3000 >>"$RESULTS_FILE" 2>&1; then ok=0; fi
@@ -491,7 +530,11 @@ step_k() {
 
 main() {
   log "E2E start $(date -u +%Y-%m-%dT%H:%M:%SZ) results=$RESULTS_FILE"
-  step_a
+  if ! step_a; then
+    log "E2E FAIL $FAILED/$TOTAL"
+    return 2
+  fi
+  step_a2
   step_b
   step_c
   step_d
