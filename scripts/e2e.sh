@@ -9,6 +9,9 @@ set -euo pipefail
 # already be in /Applications. It builds Tools/ if needed.
 # It never leaves SMH holding an assertion: trap EXIT quits SMH (release
 # first via `smhctl quit`, then TERM, then KILL) and quits the fixtures.
+# The run changes SMH's settings (a 3 s reveal time, then an empty hidden
+# set). So it saves the dev.yili.smh settings before the clean start, and
+# trap EXIT puts them back after SMH has quit (same as adversarial.sh).
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TOOLS_BUILD="$ROOT/Tools/build"
@@ -20,10 +23,17 @@ mkdir -p "$RESULTS_DIR"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 RESULTS_FILE="$RESULTS_DIR/e2e-$STAMP.txt"
 : > "$RESULTS_FILE"
+PREFS_BACKUP="$RESULTS_DIR/e2e-$STAMP-prefs.plist"
 
 SMH_APP="/Applications/Simple Menubar Hider.app"
 SMH_BID="dev.yili.smh"
 SMH_PROC_PATTERN="Simple Menubar Hider.app/Contents/MacOS/"
+# SMH saves its settings as JSON data under this key in this domain
+# (Packages/SMHCore/Sources/SMHCore/Settings.swift, App/Engine/AppController.swift).
+PREFS_DOMAIN="dev.yili.smh"
+PREFS_KEY="SMHCore.settings"
+PREFS_SAVED=0     # 1: domain exported to PREFS_BACKUP; 2: domain did not exist
+PREFS_TOUCHED=0   # 1 once the script may have changed SMH's settings
 ONE_BID="dev.yili.smh.fixture.one"
 MANY_BID="dev.yili.smh.fixture.many"
 WIDE_BID="dev.yili.smh.fixture.wide"
@@ -114,7 +124,39 @@ wait_smh_answers() {
   return 1
 }
 
+# save_prefs: copy the dev.yili.smh domain to PREFS_BACKUP, or remember
+# that it did not exist.
+save_prefs() {
+  local rc=0
+  defaults export "$PREFS_DOMAIN" "$PREFS_BACKUP" >>"$RESULTS_FILE" 2>&1 || rc=$?
+  if [ "$rc" -eq 0 ] && [ -f "$PREFS_BACKUP" ]; then
+    PREFS_SAVED=1
+    printf '%s\n' "saved $PREFS_DOMAIN settings to $PREFS_BACKUP" >> "$RESULTS_FILE"
+  else
+    PREFS_SAVED=2
+    printf '%s\n' "no $PREFS_DOMAIN settings to save (export rc $rc)" >> "$RESULTS_FILE"
+  fi
+}
+
+# restore_prefs: put the saved settings back. Call it only after SMH has
+# quit, or SMH can write its own settings over them.
+restore_prefs() {
+  [ "$PREFS_TOUCHED" -eq 1 ] || return 0
+  if [ "$PREFS_SAVED" -eq 1 ]; then
+    if defaults import "$PREFS_DOMAIN" "$PREFS_BACKUP" >>"$RESULTS_FILE" 2>&1; then
+      log "restored $PREFS_DOMAIN settings from $PREFS_BACKUP"
+    else
+      log "WARNING: could not restore $PREFS_DOMAIN settings; the saved copy is $PREFS_BACKUP"
+    fi
+  elif [ "$PREFS_SAVED" -eq 2 ]; then
+    # There were no settings before the run; remove only the key this run wrote.
+    defaults delete "$PREFS_DOMAIN" "$PREFS_KEY" >>"$RESULTS_FILE" 2>&1 || true
+    log "removed $PREFS_DOMAIN $PREFS_KEY (it did not exist before the run)"
+  fi
+}
+
 cleanup() {
+  set +e
   # Release hiding first, then escalate: quit, TERM, KILL.
   if [ -x "$SMHCTL" ]; then
     "$SMHCTL" quit --timeout-ms 2000 >/dev/null 2>&1 || true
@@ -148,6 +190,12 @@ cleanup() {
       kill -KILL "$(pgrep -x "$name" 2>/dev/null || true)" 2>/dev/null || true
     fi
   done
+  # SMH must be gone before the import, or it can write over the settings.
+  if [ -n "$(smh_pids)" ]; then
+    log "WARNING: SMH is still running; not restoring $PREFS_DOMAIN settings (the saved copy is $PREFS_BACKUP)"
+  else
+    restore_prefs || true
+  fi
 }
 trap cleanup EXIT
 
@@ -157,7 +205,7 @@ step_a() {
   local t0 dt problems=0
   t0=$(now_ms)
 
-  for tool in open osascript pgrep python3 PlistBuddy dirname date; do
+  for tool in open osascript pgrep python3 PlistBuddy dirname date defaults; do
     if ! command -v "$tool" >/dev/null 2>&1 && [ ! -x "/usr/libexec/$tool" ]; then
       log "MISSING tool: $tool"
       problems=$((problems + 1))
@@ -534,6 +582,9 @@ main() {
     log "E2E FAIL $FAILED/$TOTAL"
     return 2
   fi
+  save_prefs
+  # From here on the run may change SMH's settings; cleanup puts them back.
+  PREFS_TOUCHED=1
   step_a2
   step_b
   step_c

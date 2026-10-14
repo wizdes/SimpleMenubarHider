@@ -13,8 +13,8 @@ set -euo pipefail
 #   4. Prints the MANUAL list, then "ADV PASS n/n" or "ADV FAIL k/n".
 #
 # Usage: scripts/adversarial.sh [--quick]
-#   --quick runs case 8 for 60 s instead of 600 s and case 15 with 50 calls
-#   instead of 500.
+#   --quick runs case 8 for 60 s instead of 600 s and case 15 with 50 reveal
+#   calls instead of 500. Case 15 always sends 20 concurrent setHidden calls.
 #
 # This script does not build or install SMH or the fixtures. They must
 # already be in /Applications. It builds Tools/ if needed.
@@ -92,6 +92,7 @@ PREFS_TOUCHED=0   # 1 once the script may have changed SMH's settings
 
 # Fixture icon colors (see Fixtures/*/main.m).
 MAGENTA="FF00FF" # FixtureOne
+CYAN="00FFFF"    # FixtureMany item 1
 BLUE="0000FF"    # FixtureWide
 GREEN="00FF00"   # FixtureFlicker
 RED="FF0000"     # fixture-nobundle
@@ -735,9 +736,29 @@ case_9b() {
   finish_case "$ok" "9b app run from ~/Downloads (report)" "$t0" "blue item is $seen while collapsed" "$detail"
 }
 
+# wait_popover <open|closed> <timeout-s>: polls `state` until popover=<want>.
+# 0 when seen. Prints the last reply.
+wait_popover() {
+  local want="$1" timeout_s="$2" i reply="" rc
+  for i in $(seq 0 "$timeout_s"); do
+    rc=0
+    reply="$("$SMHCTL" state --timeout-ms 2000 2>>"$RESULTS_FILE")" || rc=$?
+    if [ "$rc" -eq 0 ] && [ "$(smh_field "$reply" popover || true)" = "$want" ]; then
+      printf '%s' "$reply"
+      return 0
+    fi
+    if [ "$i" -lt "$timeout_s" ]; then sleep 1 || true; fi
+  done
+  printf '%s' "$reply"
+  return 1
+}
+
 # ------------------------------------------------------------------- case 10 ---
+# Hiding every app, SMH included, must keep SMH working, and SMH's own
+# status item must still exist. The popover opens anchored to that item,
+# so popover=open proves the item is still there.
 case_10() {
-  local t0 ok=1 detail="" reply="" state="" allow=""
+  local t0 ok=1 detail="" reply="" state="" allow="" pop="" rc=0
   t0=$(now_ms)
   if ! ensure_collapsed >/dev/null; then ok=0; detail="could not collapse hiding FixtureOne"; fi
   if [ "$ok" -eq 1 ]; then
@@ -759,7 +780,33 @@ case_10() {
       ok=0; detail="SMH stopped answering after hiding every fixture and itself"
     fi
   fi
-  finish_case "$ok" "10 hide everything keeps SMH working" "$t0" "state=$state allowCount=$allow" "$detail reply=[$reply]"
+  if [ "$ok" -eq 1 ]; then
+    rc=0
+    reply="$("$SMHCTL" openPopover --timeout-ms 3000 2>>"$RESULTS_FILE")" || rc=$?
+    note "  openPopover: $reply (rc $rc)"
+    pop="$(smh_field "$reply" popover || true)"
+    if [ "$rc" -ne 0 ]; then
+      ok=0; detail="openPopover got no reply (rc $rc)"
+    elif [ "$pop" != "open" ]; then
+      # The reply can come before the popover is shown; ask again for 2 s.
+      if reply="$(wait_popover open 2)"; then
+        pop="open"
+      else
+        ok=0; detail="SMH's own icon is gone: popover=[$pop] after openPopover"
+      fi
+    fi
+  fi
+  if [ "$pop" = "open" ]; then
+    # Close it again so later cases start with the popover closed.
+    rc=0
+    "$SMHCTL" closePopover --timeout-ms 3000 >>"$RESULTS_FILE" 2>&1 || rc=$?
+    if [ "$rc" -ne 0 ]; then
+      ok=0; detail="${detail:+$detail; }closePopover got no reply (rc $rc)"
+    elif ! wait_popover closed 3 >/dev/null; then
+      ok=0; detail="${detail:+$detail; }popover still open 3 s after closePopover"
+    fi
+  fi
+  finish_case "$ok" "10 hide everything keeps SMH working" "$t0" "state=$state allowCount=$allow popover opened and closed" "$detail reply=[$reply]"
 }
 
 # ------------------------------------------------------------------- case 11 ---
@@ -900,8 +947,16 @@ case_14() {
 }
 
 # ------------------------------------------------------------------- case 15 ---
+# Part 2 of case 15 sends 20 setHidden calls at once, half "FixtureOne"
+# and half "FixtureOne+FixtureMany", then one last "FixtureOne" call. Each
+# new call can arrive while an older apply is still running, so SMH has to
+# drop the older one. The last requested list must win: magenta HIDDEN,
+# cyan VISIBLE.
+SETHIDDEN_BURST=20
+
 case_15() {
   local t0 ok=1 detail="" reply="" state="" pid="" rss0="" rss1="" i rc misses=0 drss=0 t1 answer_ms=""
+  local list="" bpid="" bpids="" bmisses=0 hidden="" cyan="" magenta=""
   t0=$(now_ms)
   if ! ensure_collapsed >/dev/null; then ok=0; detail="could not collapse hiding FixtureOne"; fi
   if [ "$ok" -eq 1 ]; then
@@ -941,8 +996,54 @@ case_15() {
         ;;
     esac
   fi
-  finish_case "$ok" "15 $REVEAL_CALLS rapid reveals" "$t0" \
-    "state=$state answered in ${answer_ms} ms, RSS ${rss0} -> ${rss1} KB, $misses calls without a reply" "$detail"
+  # Part 2: concurrent setHidden calls; the final requested list wins.
+  if [ "$ok" -eq 1 ]; then
+    if ! pgrep -x FixtureMany >/dev/null 2>&1; then
+      if ! launch_app "$MANY_APP"; then ok=0; detail="could not launch FixtureMany"; fi
+    fi
+  fi
+  if [ "$ok" -eq 1 ]; then
+    if ! probe_wait "$CYAN" visible 15000 >/dev/null; then ok=0; detail="cyan never VISIBLE before the burst"; fi
+  fi
+  if [ "$ok" -eq 1 ]; then
+    bpids=""
+    for i in $(seq 1 "$SETHIDDEN_BURST"); do
+      if [ $(( i % 2 )) -eq 1 ]; then list="$ONE_BID"; else list="$ONE_BID,$MANY_BID"; fi
+      "$SMHCTL" setHidden "$list" --timeout-ms 5000 >>"$RESULTS_FILE" 2>&1 &
+      bpids="$bpids $!"
+    done
+    for bpid in $bpids; do
+      rc=0
+      wait "$bpid" || rc=$?
+      if [ "$rc" -ne 0 ]; then bmisses=$((bmisses + 1)); fi
+    done
+    note "  $SETHIDDEN_BURST concurrent setHidden calls, $bmisses without a reply"
+    if [ "$bmisses" -gt 0 ]; then ok=0; detail="$bmisses of $SETHIDDEN_BURST concurrent setHidden calls got no reply within 5 s"; fi
+    # The FixtureOne-only call goes last, after every burst call has answered.
+    rc=0
+    reply="$("$SMHCTL" setHidden "$ONE_BID" --timeout-ms 5000 2>>"$RESULTS_FILE")" || rc=$?
+    note "  final setHidden: $reply (rc $rc)"
+    if [ "$rc" -ne 0 ]; then ok=0; detail="${detail:+$detail; }final setHidden got no reply (rc $rc)"; fi
+  fi
+  if [ "$ok" -eq 1 ]; then
+    sleep 2 || true
+    rc=0
+    reply="$("$SMHCTL" state --timeout-ms 3000 2>>"$RESULTS_FILE")" || rc=$?
+    hidden="$(smh_field "$reply" hidden || true)"
+    if [ "$rc" -ne 0 ]; then ok=0; detail="state did not answer after the burst (rc $rc)"
+    elif [ "$hidden" != "$ONE_BID" ]; then ok=0; detail="hidden=[$hidden] after the burst, want $ONE_BID"; fi
+    # A reveal from part 1 may still be running; give it up to 3 s to end.
+    if probe_wait "$MAGENTA" hidden 3000 >/dev/null; then magenta="HIDDEN"; else magenta="$(probe_now "$MAGENTA")"; fi
+    cyan="$(probe_now "$CYAN")"
+    if [ "$magenta" != "HIDDEN" ]; then ok=0; detail="${detail:+$detail; }magenta is $magenta after the burst, want HIDDEN"; fi
+    if [ "$cyan" != "VISIBLE" ]; then ok=0; detail="${detail:+$detail; }cyan is $cyan after the burst, want VISIBLE"; fi
+  fi
+  quit_bid "$MANY_BID"
+  if ! wait_gone exact FixtureMany 5; then
+    term_then_kill exact FixtureMany || true
+  fi
+  finish_case "$ok" "15 $REVEAL_CALLS rapid reveals, $SETHIDDEN_BURST concurrent setHidden" "$t0" \
+    "state=$state answered in ${answer_ms} ms, RSS ${rss0} -> ${rss1} KB, $misses calls without a reply; after the burst magenta=$magenta cyan=$cyan" "$detail"
 }
 
 # ------------------------------------------------------------------- case 16 ---

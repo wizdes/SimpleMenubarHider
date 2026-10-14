@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SMH hiding flow · Sequence</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f5f5f5;
+      --color-ink:     #2d3142;
+      --color-muted:   #4f5d75;
+      --color-accent:  #bf4520;
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+    .frame { max-width: 1200px; width: 100%; }
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 1.5rem;
+    }
+    .scroll { overflow-x: auto; }
+    svg { width: 100%; min-width: 1000px; display: block; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Sequence · Simple Menubar Hider · macOS 27</p>
+    <h1>How SMH hides menu bar icons</h1>
+    <div class="scroll">
+    <svg viewBox="0 0 1000 776" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="hiding-flow-title hiding-flow-desc">
+      <title id="hiding-flow-title">How SMH hides menu bar icons</title>
+      <desc id="hiding-flow-desc">Sequence diagram: the user ticks an app, SMH sends MenuBarAgent an allow list of every running app except the hidden ones, swaps in a new list when another app launches, releases the list when the user clicks to reveal, and MenuBarAgent restores every icon if SMH quits or crashes.</desc>
+      <defs>
+        <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
+          <circle cx="1" cy="1" r="0.9" fill="rgba(45,49,66,0.10)"/>
+        </pattern>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/>
+        </marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#bf4520"/>
+        </marker>
+        <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/>
+        </marker>
+        <marker id="arrow-open" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polyline points="0 0, 8 3, 0 6" fill="none" stroke="#4f5d75" stroke-width="1.2"/>
+        </marker>
+      </defs>
+
+      <rect width="100%" height="100%" fill="#f5f5f5"/>
+      <rect width="100%" height="100%" fill="url(#dots)" opacity="0.55"/>
+
+      <!-- Lifelines: User 128, SMH 352, MenuBarAgent 600, New app 840 -->
+      <line x1="128" y1="128" x2="128" y2="700" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+      <line x1="352" y1="128" x2="352" y2="700" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+      <line x1="600" y1="128" x2="600" y2="700" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+      <line x1="840" y1="128" x2="840" y2="700" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+
+      <!-- opt fragment: SMH quits or crashes (spans SMH and MenuBarAgent) -->
+      <rect x="316" y="620" width="440" height="72" rx="4" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.22)" stroke-width="1"/>
+      <rect x="316" y="620" width="40" height="16" rx="2" fill="#f5f5f5" stroke="rgba(45,49,66,0.22)" stroke-width="1"/>
+      <text x="336" y="632" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.12em">OPT</text>
+      <text x="364" y="632" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.04em">[SMH quits, is killed or crashes]</text>
+
+      <!-- SMH activation bar -->
+      <rect x="348" y="172" width="8" height="436" fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+
+      <!-- M1 User -> SMH: tick app -->
+      <line x1="128" y1="176" x2="348" y2="176" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+      <!-- M2 SMH -> MenuBarAgent: allow list (headline) -->
+      <line x1="356" y1="224" x2="600" y2="224" stroke="#bf4520" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+      <!-- M3 MenuBarAgent -> SMH: active (return) -->
+      <line x1="600" y1="264" x2="356" y2="264" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+      <!-- M4 New app -> SMH: launched (async, seen through KVO) -->
+      <line x1="840" y1="320" x2="356" y2="320" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow-open)"/>
+      <!-- M5 SMH -> MenuBarAgent: new list first -->
+      <line x1="356" y1="368" x2="600" y2="368" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <!-- M6 SMH -> MenuBarAgent: drop old list -->
+      <line x1="356" y1="408" x2="600" y2="408" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <!-- M7 User -> SMH: left click -->
+      <line x1="128" y1="464" x2="348" y2="464" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+      <!-- M8 SMH -> MenuBarAgent: release -->
+      <line x1="356" y1="512" x2="600" y2="512" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <!-- M9 SMH self: timer, rehide -->
+      <path d="M 356 552 L 384 552 Q 392 552 392 560 L 392 576 Q 392 584 384 584 L 356 584" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <!-- M10 MenuBarAgent self: assertion ends, all icons back -->
+      <path d="M 600 652 L 628 652 Q 636 652 636 660 L 636 668 Q 636 676 628 676 L 600 676" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <!-- Labels (masks 8px above each line) -->
+      <rect x="196" y="156" width="88" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="240" y="165" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">TICK APP</text>
+
+      <rect x="420" y="204" width="116" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="478" y="213" fill="#bf4520" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ALLOW LIST</text>
+
+      <rect x="436" y="244" width="84" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="478" y="253" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ACTIVE</text>
+
+      <rect x="664" y="300" width="112" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="720" y="309" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">APP LAUNCHED</text>
+
+      <rect x="412" y="348" width="132" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="478" y="357" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">NEW LIST FIRST</text>
+
+      <rect x="416" y="388" width="124" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="478" y="397" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">DROP OLD LIST</text>
+
+      <rect x="192" y="444" width="96" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="240" y="453" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">LEFT CLICK</text>
+
+      <rect x="436" y="492" width="84" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="478" y="501" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">RELEASE</text>
+
+      <rect x="400" y="562" width="124" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="462" y="571" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">TIMER · REHIDE</text>
+
+      <rect x="644" y="658" width="104" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="696" y="667" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ALL ICONS BACK</text>
+
+      <!-- Actors -->
+      <rect x="56" y="72" width="144" height="56" rx="6" fill="#f5f5f5"/>
+      <rect x="56" y="72" width="144" height="56" rx="6" fill="rgba(79,93,117,0.10)" stroke="#5a6580" stroke-width="1"/>
+      <rect x="64" y="80" width="32" height="12" rx="2" fill="transparent" stroke="rgba(90,101,128,0.40)" stroke-width="0.8"/>
+      <text x="80" y="89" fill="#5a6580" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">USER</text>
+      <text x="128" y="104" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">You</text>
+      <text x="128" y="119" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">popover · icon</text>
+
+      <rect x="272" y="72" width="160" height="56" rx="6" fill="#f5f5f5"/>
+      <rect x="272" y="72" width="160" height="56" rx="6" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1"/>
+      <rect x="280" y="80" width="32" height="12" rx="2" fill="transparent" stroke="rgba(191,69,32,0.50)" stroke-width="0.8"/>
+      <text x="296" y="89" fill="#bf4520" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">APP</text>
+      <text x="352" y="104" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">SMH</text>
+      <text x="352" y="119" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">engine + shim</text>
+
+      <rect x="520" y="72" width="160" height="56" rx="6" fill="#f5f5f5"/>
+      <rect x="520" y="72" width="160" height="56" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+      <rect x="528" y="80" width="36" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.22)" stroke-width="0.8"/>
+      <text x="546" y="89" fill="#5a6580" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">APPLE</text>
+      <text x="600" y="104" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">MenuBarAgent</text>
+      <text x="600" y="119" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">MBAssessmentMode</text>
+
+      <rect x="768" y="72" width="144" height="56" rx="6" fill="#f5f5f5"/>
+      <rect x="768" y="72" width="144" height="56" rx="6" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.22)" stroke-width="1" stroke-dasharray="4,3"/>
+      <rect x="776" y="80" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.22)" stroke-width="0.8"/>
+      <text x="790" y="89" fill="#5a6580" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ASY</text>
+      <text x="840" y="104" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">New menu bar app</text>
+      <text x="840" y="119" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">runningApplications</text>
+
+      <!-- Legend -->
+      <line x1="56" y1="716" x2="944" y2="716" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+      <text x="56" y="732" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.18em">LEGEND</text>
+      <rect x="56" y="748" width="14" height="10" rx="2" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1"/>
+      <text x="76" y="756" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Focal actor</text>
+      <rect x="188" y="744" width="4" height="18" fill="rgba(45,49,66,0.06)" stroke="#4f5d75" stroke-width="0.8"/>
+      <text x="200" y="756" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Activation</text>
+      <line x1="308" y1="754" x2="336" y2="754" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+      <text x="344" y="756" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">User action</text>
+      <line x1="460" y1="754" x2="488" y2="754" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow-open)"/>
+      <text x="496" y="756" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Return / async</text>
+      <line x1="628" y1="754" x2="656" y2="754" stroke="#bf4520" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+      <text x="664" y="756" fill="#4f5d75" font-size="8.5" font-family="'Geist', sans-serif">Hide: running apps minus hidden</text>
+    </svg>
+    </div>
+  </div>
+</body>
+</html>
