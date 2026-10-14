@@ -313,6 +313,7 @@ static int visible(int argc, const char **argv) {
         task.launchPath = @"/usr/sbin/screencapture";
         task.arguments = @[@"-x", @"-R", [NSString stringWithFormat:@"%ld,%ld,%ld,%ld", (long)x, (long)y, (long)w, (long)h], path];
         @try { [task launch]; } @catch (NSException *e) {
+            [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
             fprintf(stderr, "capture launch failed: %s\n", e.reason.UTF8String);
             fprintf(stderr, "capture_ms %.1f\n", (CFAbsoluteTimeGetCurrent() - started) * 1000);
             return 7;
@@ -325,10 +326,10 @@ static int visible(int argc, const char **argv) {
             return 7;
         }
         CGImageSourceRef source = CGImageSourceCreateWithURL((__bridge CFURLRef)[NSURL fileURLWithPath:path], NULL);
-        CGImageRef image = source ? CGImageSourceCreateImageAtIndex(source, 0, NULL) : NULL;
+        CGImageRef image = source ? CGImageSourceCreateImageAtIndex(source, 0, (__bridge CFDictionaryRef)@{(id)kCGImageSourceShouldCacheImmediately: @YES}) : NULL;
         if (source) CFRelease(source);
-        [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
         if (!image) {
+            [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
             fprintf(stderr, "capture image could not be loaded\n");
             fprintf(stderr, "capture_ms %.1f\n", (CFAbsoluteTimeGetCurrent() - started) * 1000);
             return 7;
@@ -346,17 +347,26 @@ static int visible(int argc, const char **argv) {
         CGContextRef context = pixels ? CGBitmapContextCreate(pixels, width, height, 8, stride, colorSpace, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big) : NULL;
         if (ownedSpace) CGColorSpaceRelease(ownedSpace);
         if (!context) {
+            [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
             free(pixels); CGImageRelease(image);
             fprintf(stderr, "capture image conversion failed\n");
             fprintf(stderr, "capture_ms %.1f\n", (CFAbsoluteTimeGetCurrent() - started) * 1000);
             return 7;
         }
         CGContextDrawImage(context, CGRectMake(0, 0, width, height), image);
+        BOOL hasDecodedPixel = NO;
         for (size_t p = 0; p < width * height; p++) {
             unsigned char *rgb = pixels + p * 4;
+            if (rgb[0] || rgb[1] || rgb[2] || rgb[3]) hasDecodedPixel = YES;
             if (abs((int)rgb[0] - target[0]) <= 12 && abs((int)rgb[1] - target[1]) <= 12 && abs((int)rgb[2] - target[2]) <= 12) matching++;
         }
         CGContextRelease(context); CGImageRelease(image); free(pixels);
+        [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+        if (!hasDecodedPixel) {
+            fprintf(stderr, "capture image decoded empty\n");
+            fprintf(stderr, "capture_ms %.1f\n", (CFAbsoluteTimeGetCurrent() - started) * 1000);
+            return 7;
+        }
     }
     if (captures == 0) {
         fprintf(stderr, "capture failed: no menu bar strip found\n");

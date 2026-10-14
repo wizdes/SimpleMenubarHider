@@ -79,5 +79,26 @@ class VisibleColorSpaceTest(unittest.TestCase):
         )
 
 
+class VisibleDecodeTest(unittest.TestCase):
+    def test_decodes_before_removing_capture(self):
+        src = read_source().split("static int visible(", 1)[1].split("\nint main(", 1)[0]
+        create = src.index("CGImageSourceCreateImageAtIndex")
+        draw = src.index("CGContextDrawImage")
+        count = src.index("for (size_t p = 0; p < width * height; p++)")
+        image_check = src.index("if (!image)", create)
+        cleanup = src.index("removeItemAtPath:path", count)
+        self.assertIn("kCGImageSourceShouldCacheImmediately: @YES", src[create:draw])
+        self.assertNotIn("removeItemAtPath:path", src[create:image_check])
+        self.assertGreater(cleanup, count, "capture must remain until pixels are counted")
+
+    def test_empty_decoded_buffer_is_capture_error(self):
+        src = read_source().split("static int visible(", 1)[1].split("\nint main(", 1)[0]
+        count = src.index("for (size_t p = 0; p < width * height; p++)")
+        report = src.index('printf("%s %lu', count)
+        self.assertIn("rgb[0] || rgb[1] || rgb[2] || rgb[3]", src[count:report])
+        self.assertIn("capture image decoded empty", src[count:report])
+        self.assertRegex(src[count:report], r"(?s)capture image decoded empty.*return 7;")
+
+
 if __name__ == "__main__":
     unittest.main()
