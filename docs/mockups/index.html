@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SMH M3 mockups — overview</title>
+<style>
+  :root{ --bg:#eef0f4; --text:#1d1d1f; --sub:#6e6e73; --card:#fff; --stroke:rgba(0,0,0,.12); color-scheme:light dark; }
+  @media (prefers-color-scheme: dark){ :root{ --bg:#141518; --text:#f2f2f4; --sub:#a7a7ad; --card:#222327; --stroke:rgba(255,255,255,.15);} }
+  *{box-sizing:border-box}
+  body{margin:0;font:13px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;background:var(--bg);color:var(--text);padding:28px 24px 48px;max-width:1440px;margin:0 auto}
+  h1{font-size:20px;margin:0}
+  p.sub{color:var(--sub);margin:6px 0 18px;max-width:70ch}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:18px}
+  .card{background:var(--card);border:1px solid var(--stroke);border-radius:12px;overflow:hidden}
+  .card header{padding:10px 14px;border-bottom:1px solid var(--stroke)}
+  .card header b{display:block;font-size:13px}
+  .card header span{color:var(--sub);font-size:12px}
+  iframe{width:100%;border:0;background:transparent;display:block}
+  .tall{height:640px}.short{height:560px}
+  footer{color:var(--sub);font-size:12px;margin-top:18px;max-width:80ch}
+</style>
+</head>
+<body>
+<h1>Simple Menubar Hider — five settings directions</h1>
+<p class="sub">Each mockup is plain HTML and CSS with no network requests. Every one shows the same 8 running apps (Dropbox hidden) plus Skype hidden and not running (2 hidden total), the Accessibility notice and unavailable warning behind the preview switcher, the four general options, and the Focus-icon note. Light and dark follow the system.</p>
+<div class="grid">
+  <div class="card"><header><b>A — Single list</b><span>One 460×520 window; list on top, options in a footer.</span></header><iframe class="tall" src="m3-a-single-list.html" title="Mockup A single list" loading="lazy"></iframe></div>
+  <div class="card"><header><b>B — Popover</b><span>Hangs from the menu bar icon; gear reveals general options.</span></header><iframe class="tall" src="m3-b-popover.html" title="Mockup B popover" loading="lazy"></iframe></div>
+  <div class="card"><header><b>C — Tabs</b><span>Toolbar with Apps and General tabs; checkboxes on Apps.</span></header><iframe class="tall" src="m3-c-tabs.html" title="Mockup C tabs" loading="lazy"></iframe></div>
+  <div class="card"><header><b>D — Menu only</b><span>No window: checkmarks, Show-for submenu, login, pause, quit.</span></header><iframe class="short" src="m3-d-menu-only.html" title="Mockup D menu only" loading="lazy"></iframe></div>
+  <div class="card"><header><b>E — Sidebar</b><span>Source list groups Hidden, Visible and Not running.</span></header><iframe class="tall" src="m3-e-sidebar.html" title="Mockup E sidebar" loading="lazy"></iframe></div>
+</div>
+<footer>Files: docs/mockups/m3-a-single-list.html, m3-b-popover.html, m3-c-tabs.html, m3-d-menu-only.html, m3-e-sidebar.html, index.html. Works at 1440 px wide; grid wraps on narrow screens.</footer>
+</body>
+</html>

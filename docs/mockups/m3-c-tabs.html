@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SMH M3-C — Tabs</title>
+<style>
+  :root{ --bg:#eceef2; --win:rgba(255,255,255,.8); --stroke:rgba(0,0,0,.12);
+    --text:#1d1d1f; --sub:#6e6e73; --accent:#0a82ff; color-scheme:light dark; }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#17181b; --win:rgba(44,45,50,.75); --stroke:rgba(255,255,255,.15);
+      --text:#f2f2f4; --sub:#a7a7ad; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:13px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;
+    background:var(--bg);color:var(--text);display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:28px 16px 40px}
+  .variants{display:flex;gap:6px;background:var(--win);border:1px solid var(--stroke);border-radius:10px;padding:3px;margin-bottom:14px}
+  .variants button{border:0;background:transparent;color:var(--sub);font:inherit;font-size:12px;padding:4px 12px;border-radius:7px;cursor:pointer}
+  .variants button[aria-pressed="true"]{background:var(--accent);color:#fff}
+  .win{width:480px;max-width:100%;background:var(--win);border:1px solid var(--stroke);border-radius:12px;
+    backdrop-filter:blur(30px) saturate(1.6);box-shadow:0 20px 60px rgba(0,0,0,.18);overflow:hidden}
+  .toolbar{display:flex;align-items:center;gap:10px;padding:10px 14px 0}
+  .traffic{display:flex;gap:7px}
+  .traffic i{width:12px;height:12px;border-radius:50%;display:block}
+  .tabs{margin:8px auto 0;display:flex;background:rgba(128,128,128,.2);border-radius:9px;padding:2px}
+  .tabs button{border:0;background:transparent;color:var(--text);font:inherit;font-size:13px;padding:3px 26px;border-radius:7px;cursor:pointer}
+  .tabs button[aria-selected="true"]{background:var(--win);box-shadow:0 1px 4px rgba(0,0,0,.2);font-weight:600}
+  .body{padding:12px 16px 16px;min-height:400px}
+  .notice{padding:9px 12px;border-radius:10px;font-size:12px;display:flex;gap:10px;align-items:center;justify-content:space-between;margin-bottom:10px}
+  .notice[hidden]{display:none}
+  .perm{background:rgba(10,130,255,.12);border:1px solid rgba(10,130,255,.35)}
+  .warn{background:rgba(255,190,40,.15);border:1px solid rgba(200,150,40,.5)}
+  .btn{background:var(--accent);color:#fff;border:0;border-radius:7px;padding:4px 12px;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+  .pane[hidden]{display:none}
+  .card{background:rgba(128,128,128,.1);border:1px solid var(--stroke);border-radius:11px;overflow:hidden}
+  .row{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--stroke)}
+  .row:last-child{border-bottom:0}
+  .icon{width:28px;height:28px;border-radius:7px;color:#fff;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .name{flex:1}.name small{display:block;color:var(--sub);font-size:11px}
+  .dim{opacity:.55}
+  .check{width:18px;height:18px;accent-color:var(--accent)}
+  .grow{display:grid;gap:12px}
+  .opt{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px}
+  select{font:inherit;color:var(--text);background:transparent;border:1px solid var(--stroke);border-radius:7px;padding:3px 6px}
+  .switch{position:relative;width:38px;height:22px;flex-shrink:0}
+  .switch input{opacity:0;position:absolute;inset:0;margin:0;cursor:pointer;z-index:1}
+  .track{position:absolute;inset:0;background:rgba(128,128,128,.45);border-radius:20px}
+  .track::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+  .switch input:checked + .track{background:var(--accent)}
+  .switch input:checked + .track::after{left:18px}
+  .note{color:var(--sub);font-size:11px;text-align:center;margin-top:10px}
+  .cap{color:var(--sub);font-size:12px;text-align:center;max-width:480px}
+  h2{font-size:13px;margin:0 0 6px}
+  .hint{color:var(--sub);font-size:12px;margin:0 0 8px}
+</style>
+</head>
+<body>
+<div class="variants" role="group" aria-label="Preview state">
+  <button aria-pressed="true" data-v="granted">Granted</button>
+  <button aria-pressed="false" data-v="perm">No permission</button>
+  <button aria-pressed="false" data-v="warn">Unavailable</button>
+</div>
+<div class="win" role="dialog" aria-label="Simple Menubar Hider settings">
+  <div class="toolbar"><span class="traffic"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></span>
+    <div class="tabs" role="tablist"><button role="tab" aria-selected="true" id="t1" type="button">Apps</button><button role="tab" aria-selected="false" id="t2" type="button">General</button></div>
+    <span style="width:52px"></span>
+  </div>
+  <div class="body">
+    <div class="notice perm" id="perm" hidden><span>SMH needs <b>Accessibility</b> access to see which apps have menu bar icons.</span><button class="btn" type="button">Open System Settings</button></div>
+    <div class="notice warn" id="warn" hidden><span>macOS changed something; SMH can&rsquo;t hide right now. All icons are shown.</span></div>
+    <div class="pane" id="p1" role="tabpanel">
+      <h2>Hide these apps</h2>
+      <p class="hint">Tick an app to hide its menu bar icon. 2 of 9 hidden.</p>
+      <div class="card">
+        <label class="row"><span class="icon" style="background:#3b7ded">1</span><span class="name">1Password</span><input class="check" type="checkbox" aria-label="Hide 1Password"></label>
+        <label class="row"><span class="icon" style="background:#0061ff">D</span><span class="name">Dropbox</span><input class="check" type="checkbox" checked aria-label="Hide Dropbox"></label>
+        <label class="row"><span class="icon" style="background:#2496ed">D</span><span class="name">Docker</span><input class="check" type="checkbox" aria-label="Hide Docker"></label>
+        <label class="row"><span class="icon" style="background:#34c77b">i</span><span class="name">iStat Menus</span><input class="check" type="checkbox" aria-label="Hide iStat Menus"></label>
+        <label class="row"><span class="icon" style="background:#e0574d">R</span><span class="name">Rectangle</span><input class="check" type="checkbox" aria-label="Hide Rectangle"></label>
+        <label class="row"><span class="icon" style="background:#4a6cf7">T</span><span class="name">Tailscale</span><input class="check" type="checkbox" aria-label="Hide Tailscale"></label>
+        <label class="row"><span class="icon" style="background:#f55d8a">F</span><span class="name">Fantastical</span><input class="check" type="checkbox" aria-label="Hide Fantastical"></label>
+        <label class="row"><span class="icon" style="background:#8e44ad">F</span><span class="name">Figma</span><input class="check" type="checkbox" aria-label="Hide Figma"></label>
+        <label class="row dim"><span class="icon" style="background:#7f8c8d">S</span><span class="name">Skype<small>Not running</small></span><input class="check" type="checkbox" checked aria-label="Hide Skype"></label>
+      </div>
+    </div>
+    <div class="pane" id="p2" role="tabpanel" hidden>
+      <h2>General</h2>
+      <p class="hint">Quiet defaults. Nothing here phones home unless you allow it.</p>
+      <div class="grow">
+        <div class="card"><div class="opt"><span>Launch at login</span><label class="switch"><input type="checkbox" checked aria-label="Launch at login"><span class="track"></span></label></div></div>
+        <div class="card"><div class="opt"><span>Show hidden icons for</span><select aria-label="Show hidden icons for"><option>5 seconds</option><option selected>10 seconds</option><option>30 seconds</option><option>60 seconds</option></select></div></div>
+        <div class="card"><div class="opt"><span>Check for updates automatically</span><label class="switch"><input type="checkbox" checked aria-label="Check for updates automatically"><span class="track"></span></label></div></div>
+        <div class="card"><div class="opt"><span>Pause hiding</span><label class="switch"><input type="checkbox" aria-label="Pause hiding"><span class="track"></span></label></div></div>
+      </div>
+    </div>
+    <div class="note">Hiding also hides the Focus icon; this is a macOS limit.</div>
+  </div>
+</div>
+<p class="cap">C — Familiar toolbar with two tabs: Apps for hiding, General for the rest.</p>
+<script>
+var t1=document.getElementById('t1'),t2=document.getElementById('t2'),
+    p1=document.getElementById('p1'),p2=document.getElementById('p2');
+function tab(n){var apps=n==='a';t1.setAttribute('aria-selected',String(apps));t2.setAttribute('aria-selected',String(!apps));p1.hidden=!apps;p2.hidden=apps;}
+t1.addEventListener('click',function(){tab('a')});t2.addEventListener('click',function(){tab('g')});
+document.querySelectorAll('.variants button').forEach(function(b){
+  b.addEventListener('click',function(){
+    document.querySelectorAll('.variants button').forEach(function(x){x.setAttribute('aria-pressed','false')});
+    b.setAttribute('aria-pressed','true');var v=b.getAttribute('data-v');
+    document.getElementById('perm').hidden=v!=='perm';
+    document.getElementById('warn').hidden=v!=='warn';
+  });
+});
+</script>
+</body>
+</html>

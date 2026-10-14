@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SMH M3-E — Sidebar</title>
+<style>
+  :root{ --bg:#e9ebef; --win:rgba(255,255,255,.8); --side:rgba(240,241,245,.7);
+    --stroke:rgba(0,0,0,.12); --text:#1d1d1f; --sub:#6e6e73; --accent:#0a82ff; color-scheme:light dark; }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#16171a; --win:rgba(42,43,48,.78); --side:rgba(30,31,35,.7);
+      --stroke:rgba(255,255,255,.14); --text:#f2f2f4; --sub:#a7a7ad; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:13px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;
+    background:var(--bg);color:var(--text);display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:28px 16px 40px}
+  .variants{display:flex;gap:6px;background:var(--win);border:1px solid var(--stroke);border-radius:10px;padding:3px;margin-bottom:14px}
+  .variants button{border:0;background:transparent;color:var(--sub);font:inherit;font-size:12px;padding:4px 12px;border-radius:7px;cursor:pointer}
+  .variants button[aria-pressed="true"]{background:var(--accent);color:#fff}
+  .win{width:620px;max-width:100%;min-height:480px;background:var(--win);border:1px solid var(--stroke);
+    border-radius:12px;backdrop-filter:blur(30px) saturate(1.6);box-shadow:0 20px 60px rgba(0,0,0,.18);overflow:hidden}
+  .titlebar{text-align:center;padding:9px;border-bottom:1px solid var(--stroke);font-weight:600;position:relative}
+  .traffic{position:absolute;left:12px;top:11px;display:flex;gap:7px}
+  .traffic i{width:12px;height:12px;border-radius:50%;display:block}
+  .cols{display:flex;min-height:440px}
+  .side{width:190px;background:var(--side);border-right:1px solid var(--stroke);padding:10px 8px;backdrop-filter:blur(20px)}
+  .g{font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.05em;padding:8px 8px 3px}
+  .srow{display:flex;gap:8px;align-items:center;padding:5px 8px;border-radius:8px;cursor:pointer;border:0;background:transparent;color:var(--text);font:inherit;width:100%;text-align:left}
+  .srow[aria-selected="true"]{background:rgba(10,130,255,.18)}
+  .count{margin-left:auto;background:rgba(128,128,128,.3);border-radius:12px;font-size:11px;padding:0 7px}
+  .detail{flex:1;padding:14px 16px}
+  .notice{padding:9px 12px;border-radius:10px;font-size:12px;display:flex;gap:10px;align-items:center;justify-content:space-between;margin-bottom:10px}
+  .notice[hidden]{display:none}
+  .perm{background:rgba(10,130,255,.12);border:1px solid rgba(10,130,255,.35)}
+  .warn{background:rgba(255,190,40,.15);border:1px solid rgba(200,150,40,.5)}
+  .btn{background:var(--accent);color:#fff;border:0;border-radius:7px;padding:4px 12px;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+  .card{background:rgba(128,128,128,.1);border:1px solid var(--stroke);border-radius:11px;margin-bottom:12px}
+  .card h2{font-size:13px;margin:0;padding:9px 12px 3px}
+  .card p{margin:0;padding:0 12px 9px;color:var(--sub);font-size:12px}
+  .row{display:flex;align-items:center;gap:10px;padding:7px 12px;border-top:1px solid var(--stroke)}
+  .icon{width:26px;height:26px;border-radius:7px;color:#fff;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .name{flex:1}.name small{display:block;color:var(--sub);font-size:11px}
+  .dim{opacity:.55}
+  .switch{position:relative;width:36px;height:21px;flex-shrink:0}
+  .switch input{opacity:0;position:absolute;inset:0;margin:0;cursor:pointer;z-index:1}
+  .track{position:absolute;inset:0;background:rgba(128,128,128,.45);border-radius:20px}
+  .track::after{content:"";position:absolute;top:2px;left:2px;width:17px;height:17px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+  .switch input:checked + .track{background:var(--accent)}
+  .switch input:checked + .track::after{left:17px}
+  .frow{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-top:1px solid var(--stroke)}
+  select{font:inherit;color:var(--text);background:transparent;border:1px solid var(--stroke);border-radius:7px;padding:2px 6px}
+  .note{color:var(--sub);font-size:11px;text-align:center;margin-top:6px}
+  .cap{color:var(--sub);font-size:12px;max-width:620px;text-align:center}
+</style>
+</head>
+<body>
+<div class="variants" role="group" aria-label="Preview state">
+  <button aria-pressed="true" data-v="granted">Granted</button>
+  <button aria-pressed="false" data-v="perm">No permission</button>
+  <button aria-pressed="false" data-v="warn">Unavailable</button>
+</div>
+<div class="win" role="dialog" aria-label="Simple Menubar Hider settings">
+  <div class="titlebar"><span class="traffic"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></span>Simple Menubar Hider</div>
+  <div class="cols">
+    <div class="side" role="listbox" aria-label="Groups">
+      <div class="g">Library</div>
+      <button class="srow" aria-selected="true" type="button">◉ Visible <span class="count">7</span></button>
+      <button class="srow" aria-selected="false" type="button">◌ Hidden <span class="count">1</span></button>
+      <button class="srow" aria-selected="false" type="button">○ Not running <span class="count">1</span></button>
+      <div class="g">Settings</div>
+      <button class="srow" aria-selected="false" type="button">⚙ General</button>
+    </div>
+    <div class="detail">
+      <div class="notice perm" id="perm" hidden><span>SMH needs <b>Accessibility</b> access to see which apps have menu bar icons.</span><button class="btn" type="button">Open System Settings</button></div>
+      <div class="notice warn" id="warn" hidden><span>macOS changed something; SMH can&rsquo;t hide right now. All icons are shown.</span></div>
+      <div id="appsView">
+        <div class="card"><h2>Visible — 7 apps</h2><p>Flip a switch to hide an icon. It moves to the Hidden group.</p>
+          <div class="row"><span class="icon" style="background:#3b7ded">1</span><span class="name">1Password</span><label class="switch"><input type="checkbox" aria-label="Hide 1Password"><span class="track"></span></label></div>
+          <div class="row"><span class="icon" style="background:#2496ed">D</span><span class="name">Docker</span><label class="switch"><input type="checkbox" aria-label="Hide Docker"><span class="track"></span></label></div>
+          <div class="row"><span class="icon" style="background:#34c77b">i</span><span class="name">iStat Menus</span><label class="switch"><input type="checkbox" aria-label="Hide iStat Menus"><span class="track"></span></label></div>
+          <div class="row"><span class="icon" style="background:#e0574d">R</span><span class="name">Rectangle</span><label class="switch"><input type="checkbox" aria-label="Hide Rectangle"><span class="track"></span></label></div>
+          <div class="row"><span class="icon" style="background:#4a6cf7">T</span><span class="name">Tailscale</span><label class="switch"><input type="checkbox" aria-label="Hide Tailscale"><span class="track"></span></label></div>
+          <div class="row"><span class="icon" style="background:#f55d8a">F</span><span class="name">Fantastical</span><label class="switch"><input type="checkbox" aria-label="Hide Fantastical"><span class="track"></span></label></div>
+          <div class="row"><span class="icon" style="background:#8e44ad">F</span><span class="name">Figma</span><label class="switch"><input type="checkbox" aria-label="Hide Figma"><span class="track"></span></label></div>
+        </div>
+        <div class="card"><h2>Hidden — 1 app</h2><p>Hidden icons return with one click, then hide again.</p>
+          <div class="row"><span class="icon" style="background:#0061ff">D</span><span class="name">Dropbox</span><label class="switch"><input type="checkbox" checked aria-label="Hide Dropbox"><span class="track"></span></label></div>
+        </div>
+        <div class="card"><h2>Not running — 1 app</h2><p>Quit apps stay listed so nothing unhides by surprise.</p>
+          <div class="row dim"><span class="icon" style="background:#7f8c8d">S</span><span class="name">Skype<small>Not running · hidden</small></span><label class="switch"><input type="checkbox" checked aria-label="Hide Skype"><span class="track"></span></label></div>
+        </div>
+      </div>
+      <div id="genView" hidden>
+        <div class="card"><h2>General</h2><p>Four quiet switches. Defaults suit most people.</p>
+          <div class="frow"><span>Launch at login</span><label class="switch"><input type="checkbox" checked aria-label="Launch at login"><span class="track"></span></label></div>
+          <div class="frow"><span>Show hidden icons for</span><select aria-label="Show hidden icons for"><option>5 seconds</option><option selected>10 seconds</option><option>30 seconds</option><option>60 seconds</option></select></div>
+          <div class="frow"><span>Check for updates automatically</span><label class="switch"><input type="checkbox" checked aria-label="Check for updates automatically"><span class="track"></span></label></div>
+          <div class="frow"><span>Pause hiding</span><label class="switch"><input type="checkbox" aria-label="Pause hiding"><span class="track"></span></label></div>
+        </div>
+      </div>
+      <div class="note">Hiding also hides the Focus icon; this is a macOS limit.</div>
+    </div>
+  </div>
+</div>
+<p class="cap">E — Source-list sidebar groups apps (Hidden / Visible / Not running); General is one quiet pane.</p>
+<script>
+var rows=document.querySelectorAll('.srow'),apps=document.getElementById('appsView'),gen=document.getElementById('genView');
+rows.forEach(function(r){r.addEventListener('click',function(){
+  rows.forEach(function(x){x.setAttribute('aria-selected','false')});r.setAttribute('aria-selected','true');
+  var g=r.textContent.indexOf('General')>-1;apps.hidden=g;gen.hidden=!g;
+});});
+document.querySelectorAll('.variants button').forEach(function(b){
+  b.addEventListener('click',function(){
+    document.querySelectorAll('.variants button').forEach(function(x){x.setAttribute('aria-pressed','false')});
+    b.setAttribute('aria-pressed','true');var v=b.getAttribute('data-v');
+    document.getElementById('perm').hidden=v!=='perm';
+    document.getElementById('warn').hidden=v!=='warn';
+  });
+});
+</script>
+</body>
+</html>

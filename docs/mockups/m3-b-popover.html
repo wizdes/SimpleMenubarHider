@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SMH M3-B — Popover</title>
+<style>
+  :root{ --bg:#dfe2e8; --pop:rgba(250,250,252,.82); --stroke:rgba(0,0,0,.12);
+    --text:#1d1d1f; --sub:#6e6e73; --accent:#0a82ff; color-scheme:light dark; }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#141518; --pop:rgba(46,47,52,.8); --stroke:rgba(255,255,255,.16);
+      --text:#f2f2f4; --sub:#a7a7ad; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:13px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;
+    background:var(--bg);color:var(--text);min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:0 16px 40px}
+  .menubar{width:100%;max-width:900px;background:rgba(128,128,128,.25);border-bottom:1px solid var(--stroke);
+    display:flex;align-items:center;gap:8px;padding:5px 14px;font-size:12px;backdrop-filter:blur(20px)}
+  .menubar .app{font-weight:700}
+  .menubar .sp{flex:1}
+  .menubar .smh{background:var(--text);color:var(--bg);border-radius:6px;padding:0 7px;font-weight:700}
+  .variants{display:flex;gap:6px;background:var(--pop);border:1px solid var(--stroke);border-radius:10px;padding:3px;margin:14px 0;backdrop-filter:blur(20px)}
+  .variants button{border:0;background:transparent;color:var(--sub);font:inherit;font-size:12px;padding:4px 12px;border-radius:7px;cursor:pointer}
+  .variants button[aria-pressed="true"]{background:var(--accent);color:#fff}
+  .stage{position:relative;width:340px;max-width:100%}
+  .arrow{width:18px;height:18px;background:var(--pop);border-left:1px solid var(--stroke);border-top:1px solid var(--stroke);
+    transform:rotate(45deg);margin:0 auto -10px;position:relative;z-index:1}
+  .pop{background:var(--pop);border:1px solid var(--stroke);border-radius:12px;
+    backdrop-filter:blur(30px) saturate(1.6);box-shadow:0 18px 50px rgba(0,0,0,.25);overflow:hidden}
+  .phead{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--stroke)}
+  .phead b{flex:1;font-size:13px}
+  .gear{border:1px solid var(--stroke);background:transparent;color:var(--text);border-radius:7px;font:inherit;padding:2px 9px;cursor:pointer}
+  .panel{border-bottom:1px solid var(--stroke);padding:10px 12px;display:grid;gap:8px;background:rgba(128,128,128,.12)}
+  .panel[hidden]{display:none}
+  .frow{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  select{font:inherit;background:transparent;color:var(--text);border:1px solid var(--stroke);border-radius:7px;padding:2px 6px}
+  .notice{margin:10px 12px 0;padding:8px 10px;border-radius:9px;font-size:12px;display:flex;gap:8px;align-items:center;justify-content:space-between}
+  .notice[hidden]{display:none}
+  .perm{background:rgba(10,130,255,.12);border:1px solid rgba(10,130,255,.35)}
+  .warn{background:rgba(255,190,40,.15);border:1px solid rgba(200,150,40,.5)}
+  .btn{background:var(--accent);color:#fff;border:0;border-radius:7px;padding:4px 10px;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+  .list{padding:6px 8px 4px;max-height:330px;overflow:auto}
+  .row{display:flex;align-items:center;gap:9px;padding:6px 6px;border-radius:8px}
+  .row:hover{background:rgba(128,128,128,.16)}
+  .icon{width:26px;height:26px;border-radius:7px;color:#fff;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .name{flex:1}.name small{display:block;color:var(--sub);font-size:11px}
+  .dim{opacity:.55}
+  .switch{position:relative;width:36px;height:21px;flex-shrink:0}
+  .switch input{opacity:0;position:absolute;inset:0;margin:0;cursor:pointer;z-index:1}
+  .track{position:absolute;inset:0;background:rgba(128,128,128,.45);border-radius:20px}
+  .track::after{content:"";position:absolute;top:2px;left:2px;width:17px;height:17px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+  .switch input:checked + .track{background:var(--accent)}
+  .switch input:checked + .track::after{left:17px}
+  .pfoot{padding:8px 12px 10px;color:var(--sub);font-size:11px;text-align:center;border-top:1px solid var(--stroke)}
+  .cap{color:var(--sub);font-size:12px;text-align:center;margin-top:12px;max-width:420px}
+</style>
+</head>
+<body>
+<div class="menubar"><span class="app">Finder</span><span>File</span><span>Edit</span><span>View</span><span class="sp"></span><span>Wi-Fi</span><span>Focus</span><span>10:24</span><span class="smh" title="SMH icon">S</span></div>
+<div class="variants" role="group" aria-label="Preview state">
+  <button aria-pressed="true" data-v="granted">Granted</button>
+  <button aria-pressed="false" data-v="perm">No permission</button>
+  <button aria-pressed="false" data-v="warn">Unavailable</button>
+</div>
+<div class="stage">
+  <div class="arrow"></div>
+  <div class="pop" role="dialog" aria-label="Simple Menubar Hider popover">
+    <div class="phead"><b>Menu bar apps</b><button class="gear" id="gear" type="button" aria-expanded="false">⚙ General</button></div>
+    <div class="panel" id="general" hidden>
+      <div class="frow"><span>Launch at login</span><label class="switch"><input type="checkbox" checked aria-label="Launch at login"><span class="track"></span></label></div>
+      <div class="frow"><span>Show hidden icons for</span><select aria-label="Show hidden icons for"><option>5 s</option><option selected>10 s</option><option>30 s</option><option>60 s</option></select></div>
+      <div class="frow"><span>Check for updates</span><label class="switch"><input type="checkbox" checked aria-label="Check for updates automatically"><span class="track"></span></label></div>
+      <div class="frow"><span>Pause hiding</span><label class="switch"><input type="checkbox" aria-label="Pause hiding"><span class="track"></span></label></div>
+    </div>
+    <div class="notice perm" id="perm" hidden><span>Give SMH <b>Accessibility</b> access to find icons.</span><button class="btn" type="button">Open System Settings</button></div>
+    <div class="notice warn" id="warn" hidden><span>macOS changed something; SMH can&rsquo;t hide right now. All icons are shown.</span></div>
+    <div class="list">
+      <div class="row"><span class="icon" style="background:#3b7ded">1</span><span class="name">1Password</span><label class="switch"><input type="checkbox" aria-label="Hide 1Password"><span class="track"></span></label></div>
+      <div class="row"><span class="icon" style="background:#0061ff">D</span><span class="name">Dropbox</span><label class="switch"><input type="checkbox" checked aria-label="Hide Dropbox"><span class="track"></span></label></div>
+      <div class="row"><span class="icon" style="background:#2496ed">D</span><span class="name">Docker</span><label class="switch"><input type="checkbox" aria-label="Hide Docker"><span class="track"></span></label></div>
+      <div class="row"><span class="icon" style="background:#34c77b">i</span><span class="name">iStat Menus</span><label class="switch"><input type="checkbox" aria-label="Hide iStat Menus"><span class="track"></span></label></div>
+      <div class="row"><span class="icon" style="background:#e0574d">R</span><span class="name">Rectangle</span><label class="switch"><input type="checkbox" aria-label="Hide Rectangle"><span class="track"></span></label></div>
+      <div class="row"><span class="icon" style="background:#4a6cf7">T</span><span class="name">Tailscale</span><label class="switch"><input type="checkbox" aria-label="Hide Tailscale"><span class="track"></span></label></div>
+      <div class="row"><span class="icon" style="background:#f55d8a">F</span><span class="name">Fantastical</span><label class="switch"><input type="checkbox" aria-label="Hide Fantastical"><span class="track"></span></label></div>
+      <div class="row"><span class="icon" style="background:#8e44ad">F</span><span class="name">Figma</span><label class="switch"><input type="checkbox" aria-label="Hide Figma"><span class="track"></span></label></div>
+      <div class="row dim"><span class="icon" style="background:#7f8c8d">S</span><span class="name">Skype<small>Not running</small></span><label class="switch"><input type="checkbox" checked aria-label="Hide Skype"><span class="track"></span></label></div>
+    </div>
+    <div class="pfoot">Hiding also hides the Focus icon; this is a macOS limit.</div>
+  </div>
+</div>
+<p class="cap">B — A small popover under the menu bar: switches first, general options behind the gear.</p>
+<script>
+var gear=document.getElementById('gear'),gen=document.getElementById('general');
+gear.addEventListener('click',function(){var open=gen.hidden;gen.hidden=!open;gear.setAttribute('aria-expanded',String(open));});
+document.querySelectorAll('.variants button').forEach(function(b){
+  b.addEventListener('click',function(){
+    document.querySelectorAll('.variants button').forEach(function(x){x.setAttribute('aria-pressed','false')});
+    b.setAttribute('aria-pressed','true');var v=b.getAttribute('data-v');
+    document.getElementById('perm').hidden=v!=='perm';
+    document.getElementById('warn').hidden=v!=='warn';
+  });
+});
+</script>
+</body>
+</html>

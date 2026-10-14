@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SMH M3-D — Menu only</title>
+<style>
+  :root{ --bg:#c9ccd4; --menu:rgba(246,246,248,.94); --stroke:rgba(0,0,0,.12);
+    --text:#1d1d1f; --sub:#6e6e73; --accent:#0a82ff; color-scheme:light dark; }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#101114; --menu:rgba(48,49,54,.94); --stroke:rgba(255,255,255,.15);
+      --text:#f2f2f4; --sub:#a7a7ad; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:13px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;
+    background:var(--bg);color:var(--text);min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:0 16px 40px}
+  .wallpaper{width:100%;max-width:900px;min-height:300px;padding:0 0 60px;position:relative;
+    background:linear-gradient(135deg,#7aa7e8,#b48ad6 55%,#7fd6c2)}
+  @media (prefers-color-scheme: dark){.wallpaper{background:linear-gradient(135deg,#1d2c4e,#3c2a52 55%,#173f3a)}}
+  .menubar{background:rgba(240,240,244,.7);backdrop-filter:blur(20px);display:flex;gap:8px;align-items:center;
+    padding:5px 14px;font-size:12px;color:#1d1d1f}
+  .menubar .sp{flex:1}
+  .menubar .smh{background:#1d1d1f;color:#fff;border-radius:6px;padding:0 7px;font-weight:700}
+  .variants{display:flex;gap:6px;background:var(--menu);border:1px solid var(--stroke);border-radius:10px;padding:3px;margin:14px auto 0;width:max-content}
+  .variants button{border:0;background:transparent;color:var(--sub);font:inherit;font-size:12px;padding:4px 12px;border-radius:7px;cursor:pointer}
+  .variants button[aria-pressed="true"]{background:var(--accent);color:#fff}
+  .menu{width:300px;background:var(--menu);border:1px solid var(--stroke);border-radius:10px;
+    box-shadow:0 18px 50px rgba(0,0,0,.3);backdrop-filter:blur(30px);padding:5px;margin:18px auto 0;font-size:13px}
+  .mi{display:flex;align-items:center;gap:8px;padding:5px 10px;border-radius:6px}
+  .mi:hover{background:var(--accent);color:#fff}
+  .mi:hover .sub{color:#fff}
+  .tick{width:16px;text-align:center;flex-shrink:0}
+  .icon{width:20px;height:20px;border-radius:5px;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .nm{flex:1}
+  .nm small{display:block;font-size:11px;opacity:.65}
+  .dim{opacity:.55}
+  .sub{color:var(--sub)}
+  .sep{height:1px;background:var(--stroke);margin:5px 8px}
+  .head{padding:5px 10px;color:var(--sub);font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+  .submem{margin:0 8px 4px 26px;border:1px solid var(--stroke);border-radius:7px;padding:3px;font-size:12px;background:rgba(128,128,128,.12)}
+  .submem .mi{padding:3px 8px}
+  .notice{width:300px;margin:10px auto 0;padding:8px 10px;border-radius:9px;font-size:12px;display:flex;gap:8px;align-items:center;justify-content:space-between;background:var(--menu);border:1px solid var(--stroke)}
+  .notice[hidden]{display:none}
+  .btn{background:var(--accent);color:#fff;border:0;border-radius:7px;padding:4px 10px;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+  .cap{color:#fff;font-size:12px;text-align:center;margin:14px auto 0;max-width:520px;text-shadow:0 1px 4px rgba(0,0,0,.4)}
+  .limit{width:300px;margin:10px auto 0;text-align:center;font-size:11px;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,.5)}
+</style>
+</head>
+<body>
+<div class="wallpaper">
+  <div class="menubar"><span><b>Finder</b></span><span>File</span><span>Edit</span><span class="sp"></span><span>Wi-Fi</span><span>Focus</span><span>10:24</span><span class="smh">S</span></div>
+  <div class="variants" role="group" aria-label="Preview state">
+    <button aria-pressed="true" data-v="granted">Granted</button>
+    <button aria-pressed="false" data-v="perm">No permission</button>
+    <button aria-pressed="false" data-v="warn">Unavailable</button>
+  </div>
+  <div class="menu" role="menu" aria-label="Simple Menubar Hider menu">
+    <div class="head">Hide icon</div>
+    <div class="mi" role="menuitemcheckbox" aria-checked="false"><span class="tick"></span><span class="icon" style="background:#3b7ded">1</span><span class="nm">1Password</span></div>
+    <div class="mi" role="menuitemcheckbox" aria-checked="true"><span class="tick">✓</span><span class="icon" style="background:#0061ff">D</span><span class="nm">Dropbox</span></div>
+    <div class="mi" role="menuitemcheckbox" aria-checked="false"><span class="tick"></span><span class="icon" style="background:#2496ed">D</span><span class="nm">Docker</span></div>
+    <div class="mi" role="menuitemcheckbox" aria-checked="false"><span class="tick"></span><span class="icon" style="background:#34c77b">i</span><span class="nm">iStat Menus</span></div>
+    <div class="mi" role="menuitemcheckbox" aria-checked="false"><span class="tick"></span><span class="icon" style="background:#e0574d">R</span><span class="nm">Rectangle</span></div>
+    <div class="mi" role="menuitemcheckbox" aria-checked="false"><span class="tick"></span><span class="icon" style="background:#4a6cf7">T</span><span class="nm">Tailscale</span></div>
+    <div class="mi" role="menuitemcheckbox" aria-checked="false"><span class="tick"></span><span class="icon" style="background:#f55d8a">F</span><span class="nm">Fantastical</span></div>
+    <div class="mi" role="menuitemcheckbox" aria-checked="false"><span class="tick"></span><span class="icon" style="background:#8e44ad">F</span><span class="nm">Figma</span></div>
+    <div class="mi dim" role="menuitemcheckbox" aria-checked="true"><span class="tick">✓</span><span class="icon" style="background:#7f8c8d">S</span><span class="nm">Skype<small>Not running</small></span></div>
+    <div class="sep"></div>
+    <div class="mi"><span class="tick"></span><span class="nm">Show for 10 s</span><span class="sub">▸</span></div>
+    <div class="submem" id="submenu">
+      <div class="mi"><span class="tick"></span><span class="nm">5 seconds</span></div>
+      <div class="mi"><span class="tick">✓</span><span class="nm">10 seconds</span></div>
+      <div class="mi"><span class="tick"></span><span class="nm">30 seconds</span></div>
+      <div class="mi"><span class="tick"></span><span class="nm">60 seconds</span></div>
+    </div>
+    <div class="mi" role="menuitemcheckbox" aria-checked="true"><span class="tick">✓</span><span class="nm">Launch at Login</span></div>
+    <div class="mi" role="menuitemcheckbox" aria-checked="false"><span class="tick"></span><span class="nm">Pause Hiding</span></div>
+    <div class="mi"><span class="tick"></span><span class="nm">Settings…</span></div>
+    <div class="sep"></div>
+    <div class="mi"><span class="tick"></span><span class="nm">Quit</span></div>
+  </div>
+  <div class="notice" id="perm" hidden><span>SMH needs <b>Accessibility</b> access to list icons.</span><button class="btn" type="button">Open System Settings</button></div>
+  <div class="notice" id="warn" hidden><span>macOS changed something; SMH can&rsquo;t hide right now. All icons are shown.</span></div>
+  <p class="limit">Hiding also hides the Focus icon; this is a macOS limit.</p>
+  <p class="cap">D — No window at all: right-click the menu bar icon, tick apps off, everything else is one menu.</p>
+</div>
+<script>
+document.querySelectorAll('.variants button').forEach(function(b){
+  b.addEventListener('click',function(){
+    document.querySelectorAll('.variants button').forEach(function(x){x.setAttribute('aria-pressed','false')});
+    b.setAttribute('aria-pressed','true');var v=b.getAttribute('data-v');
+    document.getElementById('perm').hidden=v!=='perm';
+    document.getElementById('warn').hidden=v!=='warn';
+  });
+});
+</script>
+</body>
+</html>

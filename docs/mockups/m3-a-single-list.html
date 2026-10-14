@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SMH M3-A — Single list</title>
+<style>
+  :root{
+    --bg:#eef0f4; --window:rgba(255,255,255,.78); --stroke:rgba(0,0,0,.12);
+    --text:#1d1d1f; --sub:#6e6e73; --accent:#0a82ff; --row:rgba(255,255,255,.6);
+    --warn-bg:#fff8e8; --warn-stroke:#e3c67c; --notice-bg:#eef4ff; --notice-stroke:#b9cdf5;
+    color-scheme:light dark;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#1a1b1e; --window:rgba(44,45,49,.72); --stroke:rgba(255,255,255,.14);
+      --text:#f2f2f4; --sub:#a7a7ad; --row:rgba(255,255,255,.05);
+      --warn-bg:rgba(255,200,60,.12); --warn-stroke:rgba(255,200,60,.4);
+      --notice-bg:rgba(80,140,255,.14); --notice-stroke:rgba(120,170,255,.4); }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:13px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif;
+    background:var(--bg);color:var(--text);display:flex;flex-direction:column;align-items:center;
+    min-height:100vh;padding:28px 16px 40px}
+  .variants{display:flex;gap:6px;background:var(--row);border:1px solid var(--stroke);
+    border-radius:10px;padding:3px;margin-bottom:14px;backdrop-filter:blur(20px)}
+  .variants button{border:0;background:transparent;color:var(--sub);font:inherit;font-size:12px;
+    padding:4px 12px;border-radius:7px;cursor:pointer}
+  .variants button[aria-pressed="true"]{background:var(--accent);color:#fff}
+  .window{width:460px;max-width:100%;min-height:520px;background:var(--window);
+    border:1px solid var(--stroke);border-radius:12px;backdrop-filter:blur(30px) saturate(1.6);
+    box-shadow:0 20px 60px rgba(0,0,0,.18);overflow:hidden;display:flex;flex-direction:column}
+  .titlebar{text-align:center;padding:10px;border-bottom:1px solid var(--stroke);
+    font-weight:600;position:relative}
+  .traffic{position:absolute;left:12px;top:12px;display:flex;gap:7px}
+  .traffic i{width:12px;height:12px;border-radius:50%;display:block}
+  .notice{margin:10px 12px 0;padding:9px 12px;border-radius:10px;font-size:12px;
+    display:flex;gap:10px;align-items:center;justify-content:space-between}
+  .notice.perm{background:var(--notice-bg);border:1px solid var(--notice-stroke)}
+  .notice.warn{background:var(--warn-bg);border:1px solid var(--warn-stroke)}
+  .notice[hidden]{display:none}
+  .btn{background:var(--accent);color:#fff;border:0;border-radius:7px;padding:4px 12px;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+  .btn.ghost{background:rgba(128,128,128,.2);color:var(--text)}
+  .list{flex:1;overflow:auto;padding:6px 12px}
+  .row{display:flex;align-items:center;gap:10px;padding:7px 8px;border-radius:9px}
+  .row:hover{background:rgba(128,128,128,.14)}
+  .icon{width:28px;height:28px;border-radius:7px;color:#fff;font-weight:600;font-size:14px;
+    display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .name{flex:1;min-width:0}
+  .name small{display:block;color:var(--sub);font-size:11px}
+  .dim{opacity:.5}
+  .pill{font-size:11px;color:var(--sub);border:1px solid var(--stroke);border-radius:20px;padding:1px 8px;white-space:nowrap}
+  .pill.hidden-pill{color:var(--accent);border-color:var(--accent)}
+  .switch{position:relative;width:38px;height:22px;flex-shrink:0}
+  .switch input{opacity:0;width:100%;height:100%;margin:0;cursor:pointer;position:absolute;z-index:1}
+  .track{position:absolute;inset:0;background:rgba(128,128,128,.4);border-radius:20px;transition:.15s}
+  .track::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.15s;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+  .switch input:checked + .track{background:var(--accent)}
+  .switch input:checked + .track::after{left:18px}
+  .switch input:focus-visible + .track{outline:2px solid var(--accent);outline-offset:2px}
+  .footer{border-top:1px solid var(--stroke);padding:10px 14px;display:grid;gap:8px;background:rgba(128,128,128,.08)}
+  .frow{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .frow .lbl{color:var(--text)}
+  select{font:inherit;background:var(--row);color:var(--text);border:1px solid var(--stroke);border-radius:7px;padding:3px 6px}
+  .note{color:var(--sub);font-size:11px;text-align:center}
+  .cap{max-width:460px;color:var(--sub);font-size:12px;margin-top:12px;text-align:center}
+</style>
+</head>
+<body>
+<div class="variants" role="group" aria-label="Preview state">
+  <button aria-pressed="true" data-v="granted">Granted</button>
+  <button aria-pressed="false" data-v="perm">No permission</button>
+  <button aria-pressed="false" data-v="warn">Unavailable</button>
+</div>
+<div class="window" role="dialog" aria-label="Simple Menubar Hider settings">
+  <div class="titlebar"><span class="traffic"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></span>Simple Menubar Hider</div>
+  <div class="notice perm" id="perm" hidden>
+    <span>SMH needs <b>Accessibility</b> access to see which apps have menu bar icons.</span>
+    <button class="btn" type="button">Open System Settings</button>
+  </div>
+  <div class="notice warn" id="warn" hidden>
+    <span>macOS changed something; SMH can&rsquo;t hide right now. All icons are shown.</span>
+  </div>
+  <div class="list">
+    <div class="row"><span class="icon" style="background:#3b7ded">1</span><span class="name">1Password</span><span class="pill">Visible</span><label class="switch"><input type="checkbox" aria-label="Hide 1Password"><span class="track"></span></label></div>
+    <div class="row"><span class="icon" style="background:#0061ff">D</span><span class="name">Dropbox</span><span class="pill hidden-pill">Hidden</span><label class="switch"><input type="checkbox" checked aria-label="Hide Dropbox"><span class="track"></span></label></div>
+    <div class="row"><span class="icon" style="background:#2496ed">D</span><span class="name">Docker</span><span class="pill">Visible</span><label class="switch"><input type="checkbox" aria-label="Hide Docker"><span class="track"></span></label></div>
+    <div class="row"><span class="icon" style="background:#34c77b">i</span><span class="name">iStat Menus</span><span class="pill">Visible</span><label class="switch"><input type="checkbox" aria-label="Hide iStat Menus"><span class="track"></span></label></div>
+    <div class="row"><span class="icon" style="background:#e0574d">R</span><span class="name">Rectangle</span><span class="pill">Visible</span><label class="switch"><input type="checkbox" aria-label="Hide Rectangle"><span class="track"></span></label></div>
+    <div class="row"><span class="icon" style="background:#4a6cf7">T</span><span class="name">Tailscale</span><span class="pill">Visible</span><label class="switch"><input type="checkbox" aria-label="Hide Tailscale"><span class="track"></span></label></div>
+    <div class="row"><span class="icon" style="background:#f55d8a">F</span><span class="name">Fantastical</span><span class="pill">Visible</span><label class="switch"><input type="checkbox" aria-label="Hide Fantastical"><span class="track"></span></label></div>
+    <div class="row"><span class="icon" style="background:#8e44ad">F</span><span class="name">Figma</span><span class="pill">Visible</span><label class="switch"><input type="checkbox" aria-label="Hide Figma"><span class="track"></span></label></div>
+    <div class="row dim"><span class="icon" style="background:#7f8c8d">S</span><span class="name">Skype<small>Not running &middot; stays in the list because it is hidden</small></span><span class="pill hidden-pill">Hidden</span><label class="switch"><input type="checkbox" checked aria-label="Hide Skype"><span class="track"></span></label></div>
+  </div>
+  <div class="footer">
+    <div class="frow"><span class="lbl">Launch at login</span><label class="switch"><input type="checkbox" checked aria-label="Launch at login"><span class="track"></span></label></div>
+    <div class="frow"><span class="lbl">Show hidden icons for</span><span><select aria-label="Show hidden icons for"><option>5 seconds</option><option selected>10 seconds</option><option>30 seconds</option><option>60 seconds</option></select></span></div>
+    <div class="frow"><span class="lbl">Check for updates automatically</span><label class="switch"><input type="checkbox" checked aria-label="Check for updates automatically"><span class="track"></span></label></div>
+    <div class="frow"><span class="lbl">Pause hiding</span><label class="switch"><input type="checkbox" aria-label="Pause hiding"><span class="track"></span></label></div>
+    <div class="note">Hiding also hides the Focus icon; this is a macOS limit.</div>
+  </div>
+</div>
+<p class="cap">A — One plain window: the app list fills it, options sit in a quiet footer.</p>
+<script>
+document.querySelectorAll('.variants button').forEach(function(b){
+  b.addEventListener('click',function(){
+    document.querySelectorAll('.variants button').forEach(function(x){x.setAttribute('aria-pressed','false')});
+    b.setAttribute('aria-pressed','true');
+    var v=b.getAttribute('data-v');
+    document.getElementById('perm').hidden = v!=='perm';
+    document.getElementById('warn').hidden = v!=='warn';
+  });
+});
+</script>
+</body>
+</html>
