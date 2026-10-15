@@ -95,9 +95,12 @@ enum PopoverRows {
     }
 
     /// The rows the arrow keys move through: the app rows that are on screen, then the general rows.
-    static func keyboardRows(apps: [String], trusted: Bool, scanning: Bool, scannedIsEmpty: Bool) -> [String] {
+    /// A disabled Pause row is skipped, so no key can reach it.
+    static func keyboardRows(apps: [String], trusted: Bool, scanning: Bool, scannedIsEmpty: Bool,
+                             pauseEnabled: Bool = true) -> [String] {
         let shown = showsAppRows(trusted: trusted, scanning: scanning, scannedIsEmpty: scannedIsEmpty) ? apps : []
-        return shown + GeneralRow.allCases.map(\.rawValue)
+        let general = GeneralRow.allCases.filter { pauseEnabled || $0 != .pause }
+        return shown + general.map(\.rawValue)
     }
 
     /// Drops the Apple system processes that the allow list never hides, so they are not offered.
@@ -189,12 +192,15 @@ struct TrustWatch: Equatable {
 }
 
 /// The Pause Hiding row. A pause for a competing hider shows a check mark and "<Name> running",
-/// but a click still flips only the user's own pause.
+/// and disables the row, so it cannot change the user's saved pause.
 struct PauseRow: Equatable {
     let checked: Bool
+    /// "<Name> running". Set only while a competing hider pauses SMH.
     let trailing: String?
-    /// The value a click gives the user's pause.
+    /// The value a click gives the user's pause when the row is enabled.
     let clickSetsUserPause: Bool
+    /// False while a competing hider pauses SMH.
+    var enabled: Bool { trailing == nil }
 
     init(checked: Bool, trailing: String?, clickSetsUserPause: Bool) {
         self.checked = checked
@@ -207,6 +213,9 @@ struct PauseRow: Equatable {
                   trailing: competitorName.map { "\($0) running" },
                   clickSetsUserPause: !userPaused)
     }
+
+    /// The value a click or key gives the user's pause, or nil when the row is disabled.
+    func click() -> Bool? { enabled ? clickSetsUserPause : nil }
 }
 
 /// Coalesces popover size updates: at most one per 0.2 s, and none while one is waiting.
@@ -242,5 +251,11 @@ enum PopoverText {
     /// The copy failed, so the stored settings were not touched.
     static func settingsLeft(backupError: String) -> String {
         "Settings could not be read and could not be backed up (\(backupError)). They were left as they are; SMH is using defaults for now."
+    }
+
+    /// A user change overwrote the unreadable settings, after a retried copy worked or failed.
+    static func settingsReplaced(copySaved: Bool) -> String {
+        copySaved ? "Settings could not be read. A copy was saved, and your change replaced them."
+            : "Settings could not be read or backed up, and were replaced by your change."
     }
 }

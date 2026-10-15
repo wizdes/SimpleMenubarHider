@@ -41,6 +41,8 @@ struct PopoverRulesTests {
         settingsLeftLine()
         pauseRowShowsCompetitorPause()
         trustGrantUsesOwnLastValue()
+        pauseRowDisabledWhileCompetitorPauses()
+        settingsReplacedLines()
         print("\(checks - failures)/\(checks) checks passed")
         exit(failures == 0 ? 0 : 1)
     }
@@ -270,6 +272,49 @@ struct PopoverRulesTests {
         expect(stale.check(trusted: true, now: 502), false, "the old open time is cleared even when it was too old")
         var trustedAtLaunch = TrustWatch(trusted: true)
         expect(trustedAtLaunch.check(trusted: true, now: 1), nil, "trusted at launch is not a grant")
+    }
+
+    // M4 fix round 3 item 2: while a competitor pauses SMH, the Pause row shows the check mark and
+    // "<Name> running", and it is disabled: a click or a key never changes the user's saved pause.
+    static func pauseRowDisabledWhileCompetitorPauses() {
+        let competitor = PauseRow(userPaused: false, competitorName: "Thaw")
+        expect(competitor.checked, true, "check mark while a competitor pauses SMH")
+        expect(competitor.trailing, "Thaw running", "names the competitor")
+        expect(competitor.enabled, false, "disabled while a competitor pauses SMH")
+        expect(competitor.click(), nil, "a click does nothing")
+        let both = PauseRow(userPaused: true, competitorName: "Thaw")
+        expect(both.enabled, false, "disabled also when the user paused too")
+        expect(both.click(), nil, "a click does not undo the user's own pause")
+        expect(PauseRow(userPaused: false, competitorName: nil).enabled, true, "enabled with no competitor")
+        expect(PauseRow(userPaused: false, competitorName: nil).click(), true, "a click pauses")
+        expect(PauseRow(userPaused: true, competitorName: nil).click(), false, "a click resumes")
+
+        let general = GeneralRow.allCases.map(\.rawValue)
+        let pause = GeneralRow.pause.rawValue
+        let rows = PopoverRows.keyboardRows(apps: ["a"], trusted: true, scanning: false, scannedIsEmpty: false,
+                                            pauseEnabled: false)
+        expect(rows, ["a"] + general.filter { $0 != pause }, "the arrow keys skip the disabled Pause row")
+        expect(PopoverRows.keyboardRows(apps: ["a"], trusted: true, scanning: false, scannedIsEmpty: false, pauseEnabled: true),
+               ["a"] + general, "an enabled Pause row is in the keyboard order")
+        var highlight = PopoverHighlight()
+        highlight.popoverOpened()
+        highlight.pointerMoved()
+        highlight.hoverBegan(pause)
+        expect(highlight.handle(.space, rows: rows), .ignored, "Space on the hovered disabled Pause row does nothing")
+        expect(highlight.handle(.returnKey, rows: rows), .ignored, "Return on the hovered disabled Pause row does nothing")
+        highlight.hoverBegan(GeneralRow.launchAtLogin.rawValue)
+        expect(highlight.handle(.down, rows: rows), .moved, "Down from Launch at Login")
+        expect(highlight.highlightedID, GeneralRow.quit.rawValue, "skips the disabled Pause row to Quit")
+    }
+
+    // M4 fix round 3 item 1: the lines after a user change replaced unreadable settings.
+    static func settingsReplacedLines() {
+        expect(PopoverText.settingsReplaced(copySaved: false),
+               "Settings could not be read or backed up, and were replaced by your change.",
+               "line when the retried copy failed")
+        expect(PopoverText.settingsReplaced(copySaved: true),
+               "Settings could not be read. A copy was saved, and your change replaced them.",
+               "line when the retried copy worked")
     }
 }
 #endif

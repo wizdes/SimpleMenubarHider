@@ -48,7 +48,8 @@ final class PopoverModel: ObservableObject {
 
     var delayTrailing: String { "\(RevealDelayChoice.label(for: revealSeconds))  ›" }
 
-    /// The Pause Hiding row: checked for either pause, with "<Name> running" while a competing hider pauses SMH.
+    /// The Pause Hiding row: checked for either pause. While a competing hider pauses SMH, it shows
+    /// "<Name> running" and is disabled.
     var pauseRow: PauseRow {
         PauseRow(userPaused: paused, competitorName: pausedForConflict ? competitors.first?.name : nil)
     }
@@ -77,7 +78,8 @@ final class PopoverModel: ObservableObject {
 
     /// The rows the keys act on: app rows only when they are on screen, then the general rows.
     var keyboardRows: [String] {
-        PopoverRows.keyboardRows(apps: rows.map(\.bundleID), trusted: trusted, scanning: scanning, scannedIsEmpty: apps.isEmpty)
+        PopoverRows.keyboardRows(apps: rows.map(\.bundleID), trusted: trusted, scanning: scanning, scannedIsEmpty: apps.isEmpty,
+                                 pauseEnabled: pauseRow.enabled)
     }
 
     func popoverOpened() {
@@ -100,7 +102,7 @@ final class PopoverModel: ObservableObject {
         switch row {
         case .delay: showDelayMenu()
         case .launchAtLogin: setLaunchAtLogin?(!launchAtLogin)
-        case .pause: setPaused?(pauseRow.clickSetsUserPause)
+        case .pause: if let paused = pauseRow.click() { setPaused?(paused) }
         case .quit: quit?()
         }
     }
@@ -204,7 +206,8 @@ struct PopoverView: View {
                     .padding(.horizontal, edge).padding(.bottom, 4)
             }
             let pauseRow = model.pauseRow
-            actionRow(.pause, PopoverModel.actionTitles[1], checked: pauseRow.checked, trailing: pauseRow.trailing)
+            actionRow(.pause, PopoverModel.actionTitles[1], checked: pauseRow.checked, trailing: pauseRow.trailing,
+                      enabled: pauseRow.enabled)
             Divider().padding(.vertical, 5)
             actionRow(.quit, PopoverModel.actionTitles[2], checked: false)
             if model.footerVisible {
@@ -284,9 +287,10 @@ struct PopoverView: View {
         }
     }
 
+    /// A disabled row never highlights and draws in the secondary color.
     private func menuRow(_ row: GeneralRow, _ title: String, trailing: String? = nil, trailingSize: CGFloat = 13,
-                         checked: Bool = false) -> some View {
-        let selected = model.isHighlighted(row.rawValue)
+                         checked: Bool = false, enabled: Bool = true) -> some View {
+        let selected = enabled && model.isHighlighted(row.rawValue)
         return HStack(spacing: 0) {
             Text(checked ? "✓" : " ").frame(width: PopoverLayout.checkColumn, alignment: .leading)
             Text(title).lineLimit(1)
@@ -301,15 +305,20 @@ struct PopoverView: View {
         .frame(height: rowHeight)
         .contentShape(Rectangle())
         .background(selected ? Color.accentColor : .clear, in: RoundedRectangle(cornerRadius: 5))
-        .foregroundStyle(selected ? .white : .primary)
+        .foregroundStyle(selected ? .white : (enabled ? .primary : .secondary))
     }
 
     /// `trailing` is small secondary text at the right, such as "Thaw running" on the Pause row.
-    private func actionRow(_ row: GeneralRow, _ title: String, checked: Bool, trailing: String? = nil) -> some View {
-        Button { model.activate(row) } label: { menuRow(row, title, trailing: trailing, trailingSize: 11, checked: checked) }
+    /// A disabled row ignores clicks and hover, and the keys skip it (PopoverRows.keyboardRows).
+    private func actionRow(_ row: GeneralRow, _ title: String, checked: Bool, trailing: String? = nil,
+                           enabled: Bool = true) -> some View {
+        Button { model.activate(row) } label: {
+            menuRow(row, title, trailing: trailing, trailingSize: 11, checked: checked, enabled: enabled)
+        }
             .buttonStyle(.plain)
             .focusable(false)
-            .onContinuousHover { phase in model.pointer(phase, over: row.rawValue) }
+            .disabled(!enabled)
+            .onContinuousHover { phase in model.pointer(enabled ? phase : .ended, over: row.rawValue) }
             .padding(.horizontal, PopoverLayout.listInset)
             .accessibilityLabel(title)
             .accessibilityValue((checked ? "checked" : "unchecked") + (trailing.map { ", \($0)" } ?? ""))

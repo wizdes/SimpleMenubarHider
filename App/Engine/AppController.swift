@@ -31,7 +31,8 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var agentRestart = ProcessRestartDetector()
     private var agentPollTimer: Timer?
     private var agentReapplyTimer: Timer?
-    /// Wake and display changes come in bursts; they force one apply 0.5 s after the last one.
+    /// Wake and display changes come in bursts; they force one apply 0.5 s after the last one,
+    /// and at most 2 s after the first one.
     private var systemDebounce = BurstDebounce()
     private var systemChangeTimer: Timer?
     private var scans = ScanSequence()
@@ -47,11 +48,9 @@ final class AppController: NSObject, NSApplicationDelegate {
     #endif
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let recovered = SettingsRecovery.load(store: store) { data in
-            try SettingsBackup.write(data, to: try SettingsRecovery.backupFolder(), now: Date())
-        }
+        let recovered = SettingsRecovery.load(store: store, backup: Self.backUpSettings)
         settings = recovered.settings
-        writer = SettingsWriter(store: store, holdAutomaticSaves: recovered.holdAutomaticSaves)
+        writer = SettingsWriter(store: store, holdAutomaticSaves: recovered.holdAutomaticSaves, backup: Self.backUpSettings)
         pause = PauseState(user: settings.paused)
         firstLaunch = recovered.firstLaunch
         settingsNote = recovered.note
@@ -141,9 +140,9 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     /// Wake and display changes: the system may have dropped the assertion, so apply again even if the list is unchanged.
-    /// A burst of them forces one apply, 0.5 s after the last one.
+    /// A burst of them forces one apply, 0.5 s after the last one, or 2 s after the first one if the burst goes on.
     @objc private func systemChanged(_ notification: Notification) {
-        logger.info("system change: \(notification.name.rawValue, privacy: .public); forcing apply after 0.5 s without more changes")
+        logger.info("system change: \(notification.name.rawValue, privacy: .public); forcing apply after 0.5 s without more changes (2 s at most)")
         updateCompetitors()
         if let delay = systemDebounce.event(now: ProcessInfo.processInfo.systemUptime) {
             scheduleSystemChangeTimer(after: delay)
@@ -304,9 +303,34 @@ final class AppController: NSObject, NSApplicationDelegate {
         revealTimer = timer
     }
 
+    /// Copies unreadable settings into the backup folder, at launch and when a user change retries it.
+    private static func backUpSettings(_ data: Data) throws -> URL {
+        try SettingsBackup.write(data, to: try SettingsRecovery.backupFolder(), now: Date())
+    }
+
+    /// Saves a user change. When saves were held, the change first retried the copy of the
+    /// unreadable settings; this logs the result and updates the popover's settings line.
+    private func saveUserChange() {
+        let result = writer.saveUserChange(settings)
+        switch result {
+        case .saved:
+            return
+        case .copiedThenSaved(let url):
+            logger.error("saved the unreadable settings to \(url.path, privacy: .public) on retry; the user's change replaced them")
+        case .savedWithoutCopy(let error):
+            logger.error("the unreadable settings were replaced by the user's change without a copy; the copy failed again: \(error, privacy: .public)")
+        }
+        let line = result.settingsLine(current: popoverModel.settingsResetLine)
+        if line != popoverModel.settingsResetLine {
+            popoverModel.settingsResetLine = line
+            // The open popover shows the new line now, so it closes with this popover.
+            if line != nil && status.isOpen { settingsLineShown = true }
+        }
+    }
+
     func setHidden(_ hidden: Set<String>, completion: @escaping () -> Void) {
         settings.hidden = hidden
-        writer.saveUserChange(settings)
+        saveUserChange()
         syncPopover()
         receive(.hiddenSetChanged, completion: completion)
     }
@@ -319,13 +343,13 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     func setRevealSeconds(_ seconds: Double) {
         settings.revealSeconds = seconds
-        writer.saveUserChange(settings)
+        saveUserChange()
         syncPopover()
     }
 
     func setPaused(_ paused: Bool, completion: @escaping () -> Void) {
         settings.paused = paused
-        writer.saveUserChange(settings)
+        saveUserChange()
         _ = pause.setUser(paused)
         syncPopover()
         receive(.pauseToggled(now: Date()), completion: completion)

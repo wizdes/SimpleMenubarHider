@@ -331,9 +331,8 @@ wait_smh_state() {
 }
 
 # smh_post <cmd> [arg]: posts one debug command and does not wait for the
-# reply. smhctl does not know failNextApplies, so this posts it the same way
-# smhctl does (docs/debug-channel.md), through osascript. A later
-# `smhctl state` shows its effect.
+# reply. It posts the same way smhctl does (docs/debug-channel.md), through
+# osascript. A later `smhctl state` shows its effect.
 smh_post() {
   osascript -l JavaScript - "dev.yili.smh.debug.command" "adv-$$-$(now_ms)" "$@" >>"$RESULTS_FILE" 2>&1 <<'JXA'
 ObjC.import("Foundation");

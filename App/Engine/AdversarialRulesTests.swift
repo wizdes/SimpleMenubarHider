@@ -4,11 +4,11 @@
 //     Packages/SMHCore/Sources/SMHCore/*.swift -emit-module-path $DIR/SMHCore.swiftmodule -o $DIR/libSMHCore.dylib
 //   xcrun swiftc -D SMH_ADVERSARIAL_TESTS -I $DIR -L $DIR -lSMHCore \
 //     App/Engine/ConflictDetector.swift App/Engine/ApplyCounter.swift App/Engine/SettingsRecovery.swift \
-//     App/Engine/AdversarialRulesTests.swift -o $DIR/adversarial-rules-tests
+//     App/UI/PopoverRules.swift App/Engine/AdversarialRulesTests.swift -o $DIR/adversarial-rules-tests
 //   DYLD_LIBRARY_PATH=$DIR $DIR/adversarial-rules-tests
 //   xcrun swiftc -D SMH_ADVERSARIAL_TESTS -D DEBUG -I $DIR -L $DIR -lSMHCore \
 //     App/Engine/ConflictDetector.swift App/Engine/ApplyCounter.swift App/Engine/SettingsRecovery.swift \
-//     App/Engine/AdversarialRulesTests.swift -o $DIR/adversarial-rules-tests-debug
+//     App/UI/PopoverRules.swift App/Engine/AdversarialRulesTests.swift -o $DIR/adversarial-rules-tests-debug
 //   DYLD_LIBRARY_PATH=$DIR $DIR/adversarial-rules-tests-debug
 // Run it twice, as above: once with Release rules and once with -D DEBUG (Debug rules).
 import Foundation
@@ -101,7 +101,57 @@ struct AdversarialRulesTests {
         expect(cleaned.settings.revealSeconds, 30, "other settings kept")
         expect(store.load(), .loaded(cleaned.settings), "the cleaned set is saved, so the log happens once")
         expect(SettingsRecovery.load(store: store, backup: backup).droppedNeverHide, [], "nothing to drop next time")
+
+        heldUserChangeRetriesTheCopy()
         print("\(checks)/\(checks) checks passed")
+    }
+
+    // M4 fix round 3 item 1: while saves are held, a user change first retries the copy.
+    // The user's change always saves, and the "left as they are" line never stays after that.
+    static func heldUserChangeRetriesTheCopy() {
+        let bad = Data("bad json".utf8)
+        let leftLine = PopoverText.settingsLeft(backupError: "disk full")
+
+        let backing = InMemoryStore()
+        let store = SettingsStore(store: backing)
+        backing.set(bad, forKey: SettingsStore.key)
+        var copied: [Data] = []
+        let copyURL = URL(fileURLWithPath: "/tmp/settings-corrupt-retry.json")
+        let writer = SettingsWriter(store: store, holdAutomaticSaves: true) { data in
+            copied.append(data)
+            return copyURL
+        }
+        let first = Settings(hidden: ["dev.example.app"])
+        expect(writer.saveUserChange(first), .copiedThenSaved(copyURL), "the retried copy worked, then the change saved")
+        expect(copied, [bad], "the retry copies the exact bad bytes")
+        expect(store.load(), .loaded(first), "the user's change is saved")
+        expect(writer.holdAutomaticSaves, false, "the hold ends")
+        let second = Settings(hidden: ["dev.example.app"], revealSeconds: 30)
+        expect(writer.saveUserChange(second), .saved, "with no hold, a change just saves")
+        expect(copied.count, 1, "no second copy")
+
+        let failBacking = InMemoryStore()
+        let failStore = SettingsStore(store: failBacking)
+        failBacking.set(bad, forKey: SettingsStore.key)
+        let failWriter = SettingsWriter(store: failStore, holdAutomaticSaves: true) { _ in
+            throw NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "disk full"])
+        }
+        expect(failWriter.saveUserChange(first), .savedWithoutCopy("disk full"), "the retry failed, and this is reported")
+        expect(failStore.load(), .loaded(first), "the user's change still saves over the unreadable bytes")
+        expect(failWriter.holdAutomaticSaves, false, "the hold ends, since the bytes are gone")
+
+        expect(SettingsWriter.UserSave.savedWithoutCopy("disk full").settingsLine(current: leftLine),
+               "Settings could not be read or backed up, and were replaced by your change.",
+               "the line after a change replaced the bytes without a copy")
+        expect(SettingsWriter.UserSave.savedWithoutCopy("disk full").settingsLine(current: nil),
+               "Settings could not be read or backed up, and were replaced by your change.",
+               "that line shows even when the earlier line was already closed")
+        let afterCopy = SettingsWriter.UserSave.copiedThenSaved(copyURL).settingsLine(current: leftLine)
+        expect(afterCopy == leftLine, false, "the left-as-they-are line never stays after the bytes were overwritten")
+        expect(afterCopy, PopoverText.settingsReplaced(copySaved: true), "the line says a copy was saved")
+        expect(SettingsWriter.UserSave.copiedThenSaved(copyURL).settingsLine(current: nil), nil,
+               "a closed line does not come back when nothing was lost")
+        expect(SettingsWriter.UserSave.saved.settingsLine(current: "other line"), "other line", "a plain save keeps the line")
     }
 
     static func expect<T: Equatable>(_ actual: T, _ expected: T, _ context: String) {

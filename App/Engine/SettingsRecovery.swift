@@ -19,18 +19,54 @@ struct RecoveredSettings {
 /// Saves settings for the app. While `holdAutomaticSaves` is on, only a user change saves,
 /// so unreadable settings that could not be copied aside are not lost to an automatic save.
 final class SettingsWriter {
-    private let store: SettingsStore
-    private(set) var holdAutomaticSaves: Bool
+    /// What a user change did to the stored settings.
+    enum UserSave: Equatable {
+        /// A plain save.
+        case saved
+        /// Saves were held. The retried copy of the unreadable bytes worked, then the change saved.
+        case copiedThenSaved(URL)
+        /// Saves were held and the retried copy failed (this error), so the change replaced the bytes with no copy.
+        case savedWithoutCopy(String)
 
-    init(store: SettingsStore, holdAutomaticSaves: Bool) {
-        self.store = store
-        self.holdAutomaticSaves = holdAutomaticSaves
+        /// The popover's settings line after this save. `current` is the line shown now, or nil.
+        /// Once the bytes are overwritten, the "left as they are" line must not stay.
+        func settingsLine(current: String?) -> String? {
+            switch self {
+            case .saved: return current
+            case .copiedThenSaved: return current == nil ? nil : PopoverText.settingsReplaced(copySaved: true)
+            case .savedWithoutCopy: return PopoverText.settingsReplaced(copySaved: false)
+            }
+        }
     }
 
-    /// The user changed a setting. This always saves, and ends the hold.
-    func saveUserChange(_ settings: Settings) {
+    private let store: SettingsStore
+    private let backup: ((Data) throws -> URL)?
+    private(set) var holdAutomaticSaves: Bool
+
+    /// `backup` copies the unreadable bytes aside. A user change retries it while saves are held.
+    init(store: SettingsStore, holdAutomaticSaves: Bool, backup: ((Data) throws -> URL)? = nil) {
+        self.store = store
+        self.holdAutomaticSaves = holdAutomaticSaves
+        self.backup = backup
+    }
+
+    /// The user changed a setting. While saves are held, this first retries the copy of the
+    /// unreadable bytes. It always saves the change, because the user's new choice matters more
+    /// than bytes SMH cannot read, and it ends the hold.
+    @discardableResult
+    func saveUserChange(_ settings: Settings) -> UserSave {
+        var result = UserSave.saved
+        if holdAutomaticSaves, let bad = store.storedData() {
+            if let backup {
+                do { result = .copiedThenSaved(try backup(bad)) }
+                catch { result = .savedWithoutCopy(error.localizedDescription) }
+            } else {
+                result = .savedWithoutCopy("no way to copy the settings was set up")
+            }
+        }
         holdAutomaticSaves = false
         store.save(settings)
+        return result
     }
 
     /// A save the user did not ask for, such as updated app names. Returns false when it was held.

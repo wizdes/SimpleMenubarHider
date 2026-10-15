@@ -46,6 +46,4 @@ $ smhctl scan
 allowCount=0 applied=no applyCount=0 conflict= found=com.example.app hidden= popover=closed settingsNote= state=expanded trusted=yes
 ```
 
-`setHidden`, `setRevealSeconds` and `toggleApp` take an argument (`toggleApp` needs a bundle id). The other commands take none. Add `--timeout-ms N` to wait longer than 5000 ms; on timeout it prints `TIMEOUT` and exits 3.
-
-`smhctl` does not send `failNextApplies` yet. `scripts/adversarial.sh` posts it with `osascript` (function `smh_post`) and then reads the state with `smhctl state`.
+`setHidden`, `setRevealSeconds`, `toggleApp` and `failNextApplies` take an argument (`toggleApp` needs a bundle id). The other commands take none. Add `--timeout-ms N` to wait longer than 5000 ms; on timeout it prints `TIMEOUT` and exits 3.
