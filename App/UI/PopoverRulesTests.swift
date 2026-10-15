@@ -38,6 +38,9 @@ struct PopoverRulesTests {
         reopenOnlyAfterRecentUntrustedOpen()
         sizeUpdatesAreCoalesced()
         popoverLines()
+        settingsLeftLine()
+        pauseRowShowsCompetitorPause()
+        trustGrantUsesOwnLastValue()
         print("\(checks - failures)/\(checks) checks passed")
         exit(failures == 0 ? 0 : 1)
     }
@@ -228,6 +231,45 @@ struct PopoverRulesTests {
                "Settings could not be read and were reset. A copy was saved.", "reset line")
         expect(PopoverText.settingsReset(backupError: "disk full"),
                "Settings could not be read and were reset. The copy could not be saved: disk full", "reset line, no copy")
+    }
+
+    // M4 fix round 2 item 1: with no copy, the settings stay as they are and SMH runs on defaults.
+    static func settingsLeftLine() {
+        expect(PopoverText.settingsLeft(backupError: "disk full"),
+               "Settings could not be read and could not be backed up (disk full). They were left as they are; SMH is using defaults for now.",
+               "line when the copy failed")
+    }
+
+    // M4 fix round 2 item 7: a pause for a competing hider shows on the Pause row, and a click
+    // still flips only the user's own pause.
+    static func pauseRowShowsCompetitorPause() {
+        expect(PauseRow(userPaused: false, competitorName: nil), PauseRow(checked: false, trailing: nil, clickSetsUserPause: true),
+               "not paused")
+        expect(PauseRow(userPaused: true, competitorName: nil), PauseRow(checked: true, trailing: nil, clickSetsUserPause: false),
+               "user paused")
+        expect(PauseRow(userPaused: false, competitorName: "Thaw"), PauseRow(checked: true, trailing: "Thaw running", clickSetsUserPause: true),
+               "paused for a competitor: check mark, name, and a click turns the user's pause on")
+        expect(PauseRow(userPaused: true, competitorName: "Thaw"), PauseRow(checked: true, trailing: "Thaw running", clickSetsUserPause: false),
+               "both pauses: a click turns the user's pause off")
+    }
+
+    // M4 fix round 2 item 8: only the 1 s trust check updates lastTrusted, and an open time is used once.
+    static func trustGrantUsesOwnLastValue() {
+        var watch = TrustWatch(trusted: false)
+        watch.openedWhileUntrusted(now: 100)
+        expect(watch.check(trusted: false, now: 101), nil, "still untrusted: no grant")
+        expect(watch.check(trusted: true, now: 110), true, "a grant soon after an untrusted open reopens")
+        expect(watch.lastTrusted, true, "the check records the new value")
+        expect(watch.check(trusted: true, now: 111), nil, "no second grant while trusted")
+        expect(watch.check(trusted: false, now: 120), nil, "access removed")
+        expect(watch.check(trusted: true, now: 130), false, "the earlier open time was used up, so this grant does not reopen")
+        var stale = TrustWatch(trusted: false)
+        stale.openedWhileUntrusted(now: 100)
+        expect(stale.check(trusted: true, now: 500), false, "an open more than 5 minutes ago does not reopen")
+        expect(stale.check(trusted: false, now: 501), nil, "access removed again")
+        expect(stale.check(trusted: true, now: 502), false, "the old open time is cleared even when it was too old")
+        var trustedAtLaunch = TrustWatch(trusted: true)
+        expect(trustedAtLaunch.check(trusted: true, now: 1), nil, "trusted at launch is not a grant")
     }
 }
 #endif

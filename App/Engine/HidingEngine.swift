@@ -18,6 +18,10 @@ final class HidingEngine {
     private var pendingTokens: Set<Int> = []
     private var lastToken = 0
     private var applyCounter = ApplyCounter()
+    #if DEBUG
+    /// Applies left to fail on purpose (debug command `failNextApplies`).
+    private var injectedFailures = 0
+    #endif
 
     init(shim: any MenuBarShimming) { self.shim = shim }
 
@@ -28,6 +32,18 @@ final class HidingEngine {
     /// `force` sends the list even when it is already active, after events that may have dropped the
     /// assertion (wake, display change, MenuBarAgent restart). Ordinary changes skip an unchanged list.
     func apply(list: [String], force: Bool = false, completion: @escaping @MainActor @Sendable (Error?) -> Void) {
+        #if DEBUG
+        if injectedFailures > 0 {
+            injectedFailures -= 1
+            logger.error("debug: failing this apply on purpose; \(self.injectedFailures) more will fail")
+            // Later, like a real shim error, so the caller is not re-entered.
+            DispatchQueue.main.async {
+                completion(NSError(domain: "SMHDebug", code: 1,
+                                   userInfo: [NSLocalizedDescriptionKey: "debug: injected apply failure"]))
+            }
+            return
+        }
+        #endif
         if !force && pendingTokens.isEmpty && activeList == list {
             logger.info("no-op: allow list is already active")
             completion(nil)
@@ -53,6 +69,13 @@ final class HidingEngine {
             }
         }
     }
+
+    #if DEBUG
+    /// The next `count` applies fail with a normal error before they reach the shim.
+    func failNextApplies(_ count: Int) {
+        injectedFailures = max(0, count)
+    }
+    #endif
 
     func release() {
         logger.info("release all assertions")

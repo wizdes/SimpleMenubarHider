@@ -6,7 +6,11 @@
 //   xcrun swiftc -D SMH_ENGINE_TESTS -I $DIR -L $DIR -lSMHCore \
 //     App/Engine/HidingEngine.swift App/Engine/ApplyCounter.swift App/Engine/HidingEngineTests.swift -o $DIR/hiding-engine-tests
 //   DYLD_LIBRARY_PATH=$DIR $DIR/hiding-engine-tests
-// It prints "N/N checks passed" and exits 0, or prints each FAIL line and exits 1.
+//   xcrun swiftc -D SMH_ENGINE_TESTS -D DEBUG -I $DIR -L $DIR -lSMHCore \
+//     App/Engine/HidingEngine.swift App/Engine/ApplyCounter.swift App/Engine/HidingEngineTests.swift -o $DIR/hiding-engine-tests-debug
+//   DYLD_LIBRARY_PATH=$DIR $DIR/hiding-engine-tests-debug
+// Run it twice, as above: once with Release rules and once with -D DEBUG (Debug-only failure injection).
+// Each run prints "N/N checks passed" and exits 0, or prints each FAIL line and exits 1.
 import Foundation
 import SMHCore
 
@@ -60,6 +64,9 @@ struct HidingEngineTests {
         unchangedListIsSkippedWhenIdle()
         failureKeepsOldList()
         forceAppliesUnchangedList()
+        #if DEBUG
+        injectedFailuresSkipTheShim()
+        #endif
         print("\(checks - failures)/\(checks) checks passed")
         exit(failures == 0 ? 0 : 1)
     }
@@ -128,5 +135,33 @@ struct HidingEngineTests {
         engine.apply(list: x) { _ in }
         expect(shim.applied.count, 2, "ordinary applies still skip the unchanged list")
     }
+
+    #if DEBUG
+    // M4 fix round 2 item 3: the debug command failNextApplies N makes the next N applies fail
+    // with a normal (not superseded) error before they reach the shim.
+    @MainActor static func injectedFailuresSkipTheShim() {
+        let shim = FakeShim()
+        let engine = HidingEngine(shim: shim)
+        let x = ["self", "x"]
+        engine.apply(list: x) { _ in }
+        shim.finish()
+        engine.failNextApplies(2)
+        var results: [String] = []
+        func record(_ error: Error?) {
+            let error = error as NSError?
+            results.append(error.map { "\($0.domain) \($0.code)" } ?? "ok")
+        }
+        engine.apply(list: x) { record($0) }
+        engine.apply(list: x, force: true) { record($0) }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        expect(results, ["SMHDebug 1", "SMHDebug 1"], "both applies fail, even the unchanged list, and neither is superseded")
+        expect(shim.applied.count, 1, "injected failures never reach the shim")
+        expect(engine.applyCount, 1, "injected failures do not count as applies")
+        engine.apply(list: ["self"]) { record($0) }
+        expect(shim.applied.count, 2, "the third apply reaches the shim again")
+        shim.finish()
+        expect(results.last, "ok", "and it succeeds")
+    }
+    #endif
 }
 #endif

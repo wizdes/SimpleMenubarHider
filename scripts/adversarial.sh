@@ -270,6 +270,92 @@ hold_hidden() {
   return 0
 }
 
+# smh_state_reply: prints one `state` reply, or returns 1 when SMH did not answer.
+smh_state_reply() {
+  "$SMHCTL" state --timeout-ms 1000 2>/dev/null
+}
+
+# apply_count_now: prints SMH's applyCount, or returns 1.
+apply_count_now() {
+  local reply="" count=""
+  reply="$(smh_state_reply)" || return 1
+  count="$(smh_field "$reply" applyCount || true)"
+  [[ "$count" =~ ^[0-9]+$ ]] || return 1
+  printf '%s' "$count"
+}
+
+# wait_apply_count_above <base> <timeout-ms>: 0 once applyCount > base.
+# Prints what it saw either way.
+wait_apply_count_above() {
+  local base="$1" timeout_ms="$2" start count=""
+  start=$(now_ms)
+  while :; do
+    count="$(apply_count_now || true)"
+    if [[ "$count" =~ ^[0-9]+$ ]] && [ "$count" -gt "$base" ]; then
+      printf 'applyCount %s -> %s after %s ms' "$base" "$count" "$(( $(now_ms) - start ))"
+      return 0
+    fi
+    if [ $(( $(now_ms) - start )) -ge "$timeout_ms" ]; then
+      printf 'applyCount stayed %s (was %s before)' "${count:-<no reply>}" "$base"
+      return 1
+    fi
+    sleep 0.2 || true
+  done
+}
+
+# wait_smh_state <state-prefix> <yes|no|any> <timeout-ms>: polls `state` until
+# the state starts with the prefix and applied matches. Prints the ms it took,
+# or the last state and applied it saw.
+wait_smh_state() {
+  local want_state="$1" want_applied="$2" timeout_ms="$3" start reply="" state="" applied=""
+  start=$(now_ms)
+  while :; do
+    if reply="$(smh_state_reply)"; then
+      state="$(smh_field "$reply" state || true)"
+      applied="$(smh_field "$reply" applied || true)"
+      case "$state" in
+        "$want_state"*)
+          if [ "$want_applied" = "any" ] || [ "$applied" = "$want_applied" ]; then
+            printf '%s' "$(( $(now_ms) - start ))"
+            return 0
+          fi
+          ;;
+      esac
+    fi
+    if [ $(( $(now_ms) - start )) -ge "$timeout_ms" ]; then
+      printf 'state=[%s] applied=[%s]' "$state" "$applied"
+      return 1
+    fi
+    sleep 0.2 || true
+  done
+}
+
+# smh_post <cmd> [arg]: posts one debug command and does not wait for the
+# reply. smhctl does not know failNextApplies, so this posts it the same way
+# smhctl does (docs/debug-channel.md), through osascript. A later
+# `smhctl state` shows its effect.
+smh_post() {
+  osascript -l JavaScript - "dev.yili.smh.debug.command" "adv-$$-$(now_ms)" "$@" >>"$RESULTS_FILE" 2>&1 <<'JXA'
+ObjC.import("Foundation");
+function run(argv) {
+  var info = $.NSMutableDictionary.alloc.init;
+  info.setObjectForKey(argv[1], "id");
+  info.setObjectForKey(argv[2], "cmd");
+  if (argv.length > 3) info.setObjectForKey(argv[3], "arg");
+  $.NSDistributedNotificationCenter.defaultCenter.postNotificationNameObjectUserInfoDeliverImmediately(argv[0], undefined, info, true);
+  return "";
+}
+JXA
+}
+
+# fail_next_applies <n>: posts failNextApplies, then waits until SMH answers
+# a `state`, so the command has arrived before the caller goes on.
+fail_next_applies() {
+  smh_post failNextApplies "$1" || return 1
+  sleep 0.3 || true
+  smh_state_reply >/dev/null
+}
+
 launch_app() { # app-path
   open -g -a "$1" 2>>"$RESULTS_FILE"
 }
@@ -526,11 +612,16 @@ case_2() {
 }
 
 # -------------------------------------------------------------------- case 3 ---
-# kill_system_agent <process-name>: kill it, wait for a new pid, then the
-# hidden fixture must be HIDDEN within 3 s and stay HIDDEN for 3 s.
+# kill_system_agent <process-name> [check-apply]: kill it, wait for a new pid,
+# then the hidden fixture must be HIDDEN within 3 s and stay HIDDEN for 3 s.
+# With check-apply, SMH's applyCount must also rise within 3 s after the new
+# pid appears, which shows SMH forced an apply after the restart.
 kill_system_agent() {
-  local name="$1" old="" new="" i rc=0 out=""
+  local name="$1" check_apply="${2:-}" old="" new="" i rc=0 out="" base="" seen_ms="" left_ms=3000 apply_msg=""
   old="$(pgrep -x "$name" 2>/dev/null | head -n 1 || true)"
+  if [ -n "$check_apply" ]; then
+    if ! base="$(apply_count_now)"; then printf 'no applyCount from SMH before killing %s' "$name"; return 1; fi
+  fi
   killall "$name" >>"$RESULTS_FILE" 2>&1 || rc=$?
   if [ "$rc" -ne 0 ]; then printf 'killall %s rc %s' "$name" "$rc"; return 1; fi
   for i in $(seq 1 100); do
@@ -540,14 +631,24 @@ kill_system_agent() {
     sleep 0.1 || true
   done
   if [ -z "$new" ]; then printf '%s did not restart within 10 s' "$name"; return 1; fi
+  seen_ms=$(now_ms)
   note "  $name restarted: $old -> $new"
-  if ! out="$(probe_wait "$MAGENTA" hidden 3000)"; then
+  if [ -n "$check_apply" ]; then
+    if ! apply_msg="$(wait_apply_count_above "$base" 3000)"; then
+      printf 'no forced apply within 3 s after %s restart: %s' "$name" "$apply_msg"; return 1
+    fi
+    note "  $apply_msg"
+    # The HIDDEN check keeps its 3 s limit from the moment the new pid appeared.
+    left_ms=$(( 3000 - ($(now_ms) - seen_ms) ))
+    if [ "$left_ms" -lt 1 ]; then left_ms=1; fi
+  fi
+  if ! out="$(probe_wait "$MAGENTA" hidden "$left_ms")"; then
     printf 'magenta not HIDDEN within 3 s after %s restart (%s)' "$name" "$out"; return 1
   fi
   if ! hold_hidden "$MAGENTA" 3; then
     printf 'magenta came back within 3 s after %s restart' "$name"; return 1
   fi
-  printf '%s restart: %s' "$name" "$out"
+  printf '%s restart: %s%s' "$name" "$out" "${apply_msg:+; $apply_msg}"
 }
 
 case_3() {
@@ -555,7 +656,7 @@ case_3() {
   t0=$(now_ms)
   if ! ensure_collapsed >/dev/null; then ok=0; detail="could not collapse hiding FixtureOne"; fi
   if [ "$ok" -eq 1 ]; then
-    if msg="$(kill_system_agent MenuBarAgent)"; then pass="$msg"; else ok=0; detail="$msg"; fi
+    if msg="$(kill_system_agent MenuBarAgent check-apply)"; then pass="$msg"; else ok=0; detail="$msg"; fi
   fi
   if [ "$ok" -eq 1 ]; then
     if msg="$(kill_system_agent ControlCenter)"; then pass="$pass; $msg"; else ok=0; detail="$msg"; fi
@@ -1072,24 +1173,189 @@ wait_conflict() {
   done
 }
 
+# quit_competitor: polite quit, then TERM and KILL. 0 when it is gone.
+quit_competitor() {
+  quit_bid "$COMPETITOR_BID"
+  if wait_gone exact FixtureCompetitor 5; then return 0; fi
+  term_then_kill exact FixtureCompetitor
+}
+
 case_16() {
-  local t0 ok=1 detail="" out="" ms_on="" ms_off=""
+  local t0 ok=1 detail="" out="" ms_on="" ms_off="" ms_paused="" user_paused=0 reply="" state="" magenta=""
   t0=$(now_ms)
   if ! ensure_collapsed >/dev/null; then ok=0; detail="could not collapse hiding FixtureOne"; fi
+  # Part 1: a running competitor pauses SMH, and its quit hides again.
   if [ "$ok" -eq 1 ]; then
     if ! launch_app "$COMPETITOR_APP"; then ok=0; detail="FixtureCompetitor launch failed"; fi
   fi
   if [ "$ok" -eq 1 ]; then
     if out="$(wait_conflict contains 3000)"; then ms_on="$out"; else ok=0; detail="no conflict within 3 s ($out)"; fi
   fi
-  quit_bid "$COMPETITOR_BID"
-  if ! wait_gone exact FixtureCompetitor 5; then
-    term_then_kill exact FixtureCompetitor || true
+  if [ "$ok" -eq 1 ]; then
+    if ! out="$(wait_smh_state expanded no 3000)"; then ok=0; detail="not expanded with applied=no within 3 s while the competitor runs ($out)"; fi
+  fi
+  if [ "$ok" -eq 1 ]; then
+    if ! out="$(probe_wait "$MAGENTA" visible 3000)"; then ok=0; detail="magenta not VISIBLE within 3 s while the competitor runs ($out)"; fi
+  fi
+  if ! quit_competitor; then
+    if [ "$ok" -eq 1 ]; then ok=0; detail="FixtureCompetitor did not quit"; fi
   fi
   if [ "$ok" -eq 1 ]; then
     if out="$(wait_conflict empty 3000)"; then ms_off="$out"; else ok=0; detail="conflict not empty 3 s after quit ($out)"; fi
   fi
-  finish_case "$ok" "16 competing hider detected" "$t0" "seen in ${ms_on} ms, cleared in ${ms_off} ms" "$detail"
+  if [ "$ok" -eq 1 ]; then
+    if ! out="$(wait_smh_state collapsed yes 3000)"; then ok=0; detail="not collapsed with applied=yes within 3 s after the competitor quit ($out)"; fi
+  fi
+  if [ "$ok" -eq 1 ]; then
+    if ! out="$(probe_wait "$MAGENTA" hidden 3000)"; then ok=0; detail="magenta not HIDDEN within 3 s after the competitor quit ($out)"; fi
+  fi
+  # Part 2: the user's own pause stays on after a competitor comes and goes.
+  if [ "$ok" -eq 1 ]; then
+    user_paused=1
+    if ! reply="$("$SMHCTL" pause --timeout-ms 5000 2>>"$RESULTS_FILE")"; then ok=0; detail="pause got no reply"; fi
+    note "  pause: $reply"
+  fi
+  if [ "$ok" -eq 1 ]; then
+    if ! out="$(wait_smh_state expanded no 3000)"; then ok=0; detail="pause did not expand ($out)"; fi
+  fi
+  if [ "$ok" -eq 1 ]; then
+    if ! launch_app "$COMPETITOR_APP"; then ok=0; detail="FixtureCompetitor second launch failed"; fi
+  fi
+  if [ "$ok" -eq 1 ]; then
+    if ! out="$(wait_conflict contains 3000)"; then ok=0; detail="no conflict within 3 s while paused ($out)"; fi
+  fi
+  if ! quit_competitor; then
+    if [ "$ok" -eq 1 ]; then ok=0; detail="FixtureCompetitor did not quit (second time)"; fi
+  fi
+  if [ "$ok" -eq 1 ]; then
+    if ! out="$(wait_conflict empty 3000)"; then ok=0; detail="conflict not empty 3 s after the second quit ($out)"; fi
+  fi
+  if [ "$ok" -eq 1 ]; then
+    # Give a wrong resume time to happen before checking that it did not.
+    sleep 1 || true
+    reply="$(smh_state_reply || true)"
+    state="$(smh_field "$reply" state || true)"
+    magenta="$(probe_now "$MAGENTA")"
+    if [ "$state" != "expanded" ] || [ "$magenta" != "VISIBLE" ]; then
+      ok=0; detail="the user's pause did not hold after the competitor quit: state=[$state] magenta=$magenta"
+    fi
+  fi
+  if [ "$user_paused" -eq 1 ]; then
+    if ! reply="$("$SMHCTL" resume --timeout-ms 5000 2>>"$RESULTS_FILE")"; then
+      if [ "$ok" -eq 1 ]; then ok=0; detail="resume got no reply"; fi
+    fi
+    note "  resume: $reply"
+  fi
+  if [ "$ok" -eq 1 ]; then
+    if out="$(wait_smh_state collapsed yes 3000)"; then ms_paused="$out"; else ok=0; detail="resume did not collapse within 3 s ($out)"; fi
+  fi
+  if [ "$ok" -eq 1 ]; then
+    if ! out="$(probe_wait "$MAGENTA" hidden 3000)"; then ok=0; detail="magenta not HIDDEN within 3 s after resume ($out)"; fi
+  fi
+  finish_case "$ok" "16 competing hider pauses SMH; the user's pause holds" "$t0" \
+    "seen in ${ms_on} ms, cleared in ${ms_off} ms, user pause held, resume collapsed in ${ms_paused} ms" "$detail"
+}
+
+# ------------------------------------------------------------------- case 19 ---
+# The debug command failNextApplies makes applies fail before the shim, so
+# this checks the real retry path: icons show while failing, then the retry
+# (2 s, then 5 s, then 15 s) hides them again.
+case_19() {
+  local t0 ok=1 detail="" out="" reply="" state="" applied="" fail_ms="" left_ms=0 pass="" \
+    start=0 now=0 elapsed=0 samples=0 recovered_ms="" magenta=""
+  t0=$(now_ms)
+  if ! ensure_collapsed >/dev/null; then ok=0; detail="could not collapse hiding FixtureOne"; fi
+  # Part 1: one failed apply, then the 2 s retry recovers.
+  if [ "$ok" -eq 1 ]; then
+    if ! fail_next_applies 1; then ok=0; detail="failNextApplies 1 could not be sent"; fi
+  fi
+  if [ "$ok" -eq 1 ]; then
+    # setHidden with the same set still asks for an apply, and that apply fails.
+    if ! reply="$("$SMHCTL" setHidden "$ONE_BID" --timeout-ms 5000 2>>"$RESULTS_FILE")"; then ok=0; detail="setHidden got no reply"; fi
+    fail_ms=$(now_ms)
+    note "  after failNextApplies 1: $reply"
+    state="$(smh_field "$reply" state || true)"
+    applied="$(smh_field "$reply" applied || true)"
+  fi
+  if [ "$ok" -eq 1 ]; then
+    case "$state" in
+      "unavailable:Hiding failed"*) ;;
+      *) ok=0; detail="expected state unavailable with applyFailed, got state=[$state]" ;;
+    esac
+    if [ "$ok" -eq 1 ] && [ "$applied" != "no" ]; then ok=0; detail="expected applied=no after the failure, got [$applied]"; fi
+  fi
+  if [ "$ok" -eq 1 ]; then
+    if ! out="$(probe_wait "$MAGENTA" visible 2000)"; then ok=0; detail="magenta not VISIBLE within 2 s after the failure ($out)"; fi
+  fi
+  if [ "$ok" -eq 1 ]; then
+    left_ms=$(( 4000 - ($(now_ms) - fail_ms) ))
+    if [ "$left_ms" -lt 1 ]; then left_ms=1; fi
+    if ! out="$(wait_smh_state collapsed yes "$left_ms")"; then ok=0; detail="not collapsed within 4 s after the failure ($out)"; fi
+  fi
+  if [ "$ok" -eq 1 ]; then
+    left_ms=$(( 4000 - ($(now_ms) - fail_ms) ))
+    if [ "$left_ms" -lt 1 ]; then left_ms=1; fi
+    if out="$(probe_wait "$MAGENTA" hidden "$left_ms")"; then
+      pass="1 failure: hidden again after $(( $(now_ms) - fail_ms )) ms"
+    else
+      ok=0; detail="magenta not HIDDEN within 4 s after the failure ($out)"
+    fi
+  fi
+  # Part 2: three failures. The retries come 2 s, then 5 s, then 15 s apart,
+  # so the third retry (about 22 s after the first failure) is the first that
+  # works. Until then the icons must stay visible.
+  if [ "$ok" -eq 1 ]; then
+    if ! fail_next_applies 3; then ok=0; detail="failNextApplies 3 could not be sent"; fi
+  fi
+  if [ "$ok" -eq 1 ]; then
+    if ! reply="$("$SMHCTL" setHidden "$ONE_BID" --timeout-ms 5000 2>>"$RESULTS_FILE")"; then ok=0; detail="setHidden got no reply (3 failures)"; fi
+    note "  after failNextApplies 3: $reply"
+    state="$(smh_field "$reply" state || true)"
+    case "$state" in
+      "unavailable:Hiding failed"*) ;;
+      *) if [ "$ok" -eq 1 ]; then ok=0; detail="expected state unavailable after the first of 3 failures, got state=[$state]"; fi ;;
+    esac
+  fi
+  if [ "$ok" -eq 1 ]; then
+    start=$(now_ms)
+    while :; do
+      now=$(now_ms)
+      elapsed=$(( now - start ))
+      reply="$(smh_state_reply || true)"
+      state="$(smh_field "$reply" state || true)"
+      applied="$(smh_field "$reply" applied || true)"
+      if [ "$state" = "collapsed" ] && [ "$applied" = "yes" ]; then
+        recovered_ms="$elapsed"
+        break
+      fi
+      case "$state" in
+        "unavailable:"*)
+          samples=$((samples + 1))
+          magenta="$(probe_now "$MAGENTA")"
+          if [ "$magenta" != "VISIBLE" ]; then
+            ok=0; detail="magenta was $magenta while SMH was failing, $elapsed ms after the first failure"; break
+          fi
+          ;;
+      esac
+      if [ "$elapsed" -ge 30000 ]; then
+        ok=0; detail="not collapsed within 30 s after 3 failures (state=[$state] applied=[$applied])"; break
+      fi
+      sleep 0.5 || true
+    done
+  fi
+  if [ "$ok" -eq 1 ] && [ "$recovered_ms" -lt 20000 ]; then
+    ok=0; detail="recovered after $recovered_ms ms, before the third retry (about 22 s): the backoff was not used"
+  fi
+  if [ "$ok" -eq 1 ]; then
+    if out="$(probe_wait "$MAGENTA" hidden 3000)"; then
+      pass="$pass; 3 failures: VISIBLE in all $samples checks while failing, hidden again after $recovered_ms ms"
+    else
+      ok=0; detail="magenta not HIDDEN within 3 s after recovery ($out)"
+    fi
+  fi
+  # Never leave planned failures behind for a later case.
+  fail_next_applies 0 || true
+  finish_case "$ok" "19 apply failure recovers" "$t0" "$pass" "$detail"
 }
 
 # ------------------------------------------------------------------- reset ---
@@ -1149,6 +1415,7 @@ main() {
   case_14
   case_15
   case_16
+  case_19
   step_reset
   print_manual
   if [ "$FAILED" -eq 0 ]; then

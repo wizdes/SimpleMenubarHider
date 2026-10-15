@@ -8,6 +8,44 @@ static NSString *const SMHShimDomain = @"SMHShim";
 #define activateSelector @selector(activateWithConfiguration:completionHandler:)
 #define invalidateSelector @selector(invalidate)
 
+#ifdef SMH_SHIM_TESTS
+static NSString *SMHTestConfigurationClassName;
+static NSString *SMHTestAssertionClassName;
+static NSTimeInterval SMHTestActivationTimeout = 5;
+#endif
+
+static Class SMHConfigurationClass(void) {
+#ifdef SMH_SHIM_TESTS
+    if (SMHTestConfigurationClassName) return objc_getClass(SMHTestConfigurationClassName.UTF8String);
+#endif
+    return objc_getClass("MBAssessmentModeConfiguration");
+}
+
+static Class SMHAssertionClass(void) {
+#ifdef SMH_SHIM_TESTS
+    if (SMHTestAssertionClassName) return objc_getClass(SMHTestAssertionClassName.UTF8String);
+#endif
+    return objc_getClass("MBAssessmentModeAssertion");
+}
+
+static int64_t SMHActivationTimeoutNanoseconds(void) {
+#ifdef SMH_SHIM_TESTS
+    return (int64_t)(SMHTestActivationTimeout * NSEC_PER_SEC);
+#else
+    return (int64_t)(5 * NSEC_PER_SEC);
+#endif
+}
+
+static BOOL SMHClassesUsable(void) {
+    Class configuration = SMHConfigurationClass();
+    Class assertion = SMHAssertionClass();
+    return configuration && assertion
+        && [configuration instancesRespondToSelector:configSelector]
+        && [assertion instancesRespondToSelector:@selector(init)]
+        && [assertion instancesRespondToSelector:activateSelector]
+        && [assertion instancesRespondToSelector:invalidateSelector];
+}
+
 static NSError *SMHError(NSInteger code, NSString *message) {
     return [NSError errorWithDomain:SMHShimDomain code:code
                           userInfo:@{NSLocalizedDescriptionKey: message}];
@@ -23,20 +61,27 @@ static NSError *SMHError(NSInteger code, NSString *message) {
 @implementation SMHMenuBarShim
 
 + (BOOL)isAvailable {
+#ifdef SMH_SHIM_TESTS
+    if (SMHTestAssertionClassName) return SMHClassesUsable();
+#endif
     static BOOL available;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         void *handle = dlopen("/System/Library/PrivateFrameworks/MenuBarClientCore.framework/MenuBarClientCore", RTLD_NOW);
-        Class configuration = objc_getClass("MBAssessmentModeConfiguration");
-        Class assertion = objc_getClass("MBAssessmentModeAssertion");
-        available = handle && configuration && assertion
-            && [configuration instancesRespondToSelector:configSelector]
-            && [assertion instancesRespondToSelector:@selector(init)]
-            && [assertion instancesRespondToSelector:activateSelector]
-            && [assertion instancesRespondToSelector:invalidateSelector];
+        available = handle && SMHClassesUsable();
     });
     return available;
 }
+
+#ifdef SMH_SHIM_TESTS
++ (void)useTestConfigurationClass:(NSString *)configuration
+                   assertionClass:(NSString *)assertion
+                activationTimeout:(NSTimeInterval)timeout {
+    SMHTestConfigurationClassName = [configuration copy];
+    SMHTestAssertionClassName = [assertion copy];
+    SMHTestActivationTimeout = timeout;
+}
+#endif
 
 - (void)invalidate:(id _Nullable)assertion {
     if (!assertion) return;
@@ -99,8 +144,8 @@ static NSError *SMHError(NSInteger code, NSString *message) {
     }
     id assertion = nil;
     @try {
-        Class configClass = objc_getClass("MBAssessmentModeConfiguration");
-        Class assertionClass = objc_getClass("MBAssessmentModeAssertion");
+        Class configClass = SMHConfigurationClass();
+        Class assertionClass = SMHAssertionClass();
         if (!configClass || !assertionClass ||
             ![configClass instancesRespondToSelector:configSelector] ||
             ![assertionClass instancesRespondToSelector:activateSelector] ||
@@ -121,7 +166,7 @@ static NSError *SMHError(NSInteger code, NSString *message) {
         ((void (*)(id, SEL, id, id))objc_msgSend)(assertion, activateSelector, configuration, ^(NSError *error) {
             dispatch_async(dispatch_get_main_queue(), ^{ [self finishGeneration:generation assertion:assertion error:error]; });
         });
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, SMHActivationTimeoutNanoseconds()), dispatch_get_main_queue(), ^{
             [self finishGeneration:generation assertion:assertion error:SMHError(3, @"activation timed out after 5 seconds")];
         });
     } @catch (NSException *exception) {

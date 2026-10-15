@@ -166,6 +166,49 @@ enum TrustReopen {
     }
 }
 
+/// Spots an Accessibility grant. `lastTrusted` changes only in `check`, the 1 s trust check,
+/// so a scan or a popover open that sees access first cannot hide the grant.
+struct TrustWatch: Equatable {
+    private(set) var lastTrusted: Bool
+    private var openedUntrustedAt: TimeInterval?
+
+    init(trusted: Bool) { lastTrusted = trusted }
+
+    /// The user opened the popover, or pressed its Accessibility button, while untrusted.
+    mutating func openedWhileUntrusted(now: TimeInterval) { openedUntrustedAt = now }
+
+    /// Returns nil when access was not just granted. On a grant, returns whether to reopen the
+    /// popover, and clears the open time so it is used only once.
+    mutating func check(trusted: Bool, now: TimeInterval) -> Bool? {
+        defer { lastTrusted = trusted }
+        guard trusted && !lastTrusted else { return nil }
+        let reopen = TrustReopen.shouldReopen(openedUntrustedAt: openedUntrustedAt, now: now)
+        openedUntrustedAt = nil
+        return reopen
+    }
+}
+
+/// The Pause Hiding row. A pause for a competing hider shows a check mark and "<Name> running",
+/// but a click still flips only the user's own pause.
+struct PauseRow: Equatable {
+    let checked: Bool
+    let trailing: String?
+    /// The value a click gives the user's pause.
+    let clickSetsUserPause: Bool
+
+    init(checked: Bool, trailing: String?, clickSetsUserPause: Bool) {
+        self.checked = checked
+        self.trailing = trailing
+        self.clickSetsUserPause = clickSetsUserPause
+    }
+
+    init(userPaused: Bool, competitorName: String?) {
+        self.init(checked: userPaused || competitorName != nil,
+                  trailing: competitorName.map { "\($0) running" },
+                  clickSetsUserPause: !userPaused)
+    }
+}
+
 /// Coalesces popover size updates: at most one per 0.2 s, and none while one is waiting.
 struct SizeUpdateThrottle: Equatable {
     static let interval: TimeInterval = 0.2
@@ -194,5 +237,10 @@ enum PopoverText {
     static func settingsReset(backupError: String?) -> String {
         guard let backupError else { return "Settings could not be read and were reset. A copy was saved." }
         return "Settings could not be read and were reset. The copy could not be saved: \(backupError)"
+    }
+
+    /// The copy failed, so the stored settings were not touched.
+    static func settingsLeft(backupError: String) -> String {
+        "Settings could not be read and could not be backed up (\(backupError)). They were left as they are; SMH is using defaults for now."
     }
 }

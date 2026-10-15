@@ -63,6 +63,42 @@ public struct ProcessRestartDetector: Equatable, Sendable {
     }
 }
 
+/// Turns a burst of wake and display-change events into one forced apply, 0.5 s after the last event.
+/// Times are monotonic seconds (ProcessInfo.systemUptime).
+public struct BurstDebounce: Equatable, Sendable {
+    public static let delay: TimeInterval = 0.5
+
+    public enum Step: Equatable, Sendable {
+        /// The burst is over: apply now.
+        case act
+        /// More events came: start the timer again with this delay.
+        case wait(TimeInterval)
+        /// No event is waiting.
+        case idle
+    }
+
+    private var lastEvent: TimeInterval?
+
+    public init() {}
+
+    /// Records an event. Returns the delay for a new timer, or nil when a timer is already waiting.
+    public mutating func event(now: TimeInterval) -> TimeInterval? {
+        let waiting = lastEvent != nil
+        lastEvent = now
+        return waiting ? nil : Self.delay
+    }
+
+    /// The timer fired.
+    public mutating func timerFired(now: TimeInterval) -> Step {
+        guard let lastEvent else { return .idle }
+        let remaining = lastEvent + Self.delay - now
+        // 1 ms of slack, so a timer that fires a hair early does not wait again.
+        if remaining > 0.001 { return .wait(remaining) }
+        self.lastEvent = nil
+        return .act
+    }
+}
+
 /// Gives each scan a number, so a slow older scan cannot overwrite a newer result.
 public struct ScanSequence: Equatable, Sendable {
     private var newest = 0

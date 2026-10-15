@@ -6,7 +6,11 @@
 //     App/Engine/ConflictDetector.swift App/Engine/ApplyCounter.swift App/Engine/SettingsRecovery.swift \
 //     App/Engine/AdversarialRulesTests.swift -o $DIR/adversarial-rules-tests
 //   DYLD_LIBRARY_PATH=$DIR $DIR/adversarial-rules-tests
-// Run it twice: once as above (Release rules) and once with -D DEBUG added (Debug rules).
+//   xcrun swiftc -D SMH_ADVERSARIAL_TESTS -D DEBUG -I $DIR -L $DIR -lSMHCore \
+//     App/Engine/ConflictDetector.swift App/Engine/ApplyCounter.swift App/Engine/SettingsRecovery.swift \
+//     App/Engine/AdversarialRulesTests.swift -o $DIR/adversarial-rules-tests-debug
+//   DYLD_LIBRARY_PATH=$DIR $DIR/adversarial-rules-tests-debug
+// Run it twice, as above: once with Release rules and once with -D DEBUG (Debug rules).
 import Foundation
 import SMHCore
 
@@ -69,7 +73,25 @@ struct AdversarialRulesTests {
             throw NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "disk full"])
         }
         expect(failedBackup.backupError, "disk full", "a failed backup is reported, not hidden")
-        expect(store.load(), .loaded(Settings()), "the reset still happens when the copy failed")
+        // M4 fix round 2 item 1: with no copy, the unreadable bytes are the only copy, so they stay.
+        expect(backing.data(forKey: SettingsStore.key), Data("bad json".utf8), "the stored bytes stay when the copy failed")
+        expect(failedBackup.settings, Settings(), "SMH runs on defaults in memory")
+        expect(failedBackup.holdAutomaticSaves, true, "automatic saves wait for a user change")
+        expect(recovered.holdAutomaticSaves, false, "a backed-up reset saves as usual")
+
+        // Item 1: automatic saves (app names) keep the bad bytes; the first user change saves.
+        let writer = SettingsWriter(store: store, holdAutomaticSaves: failedBackup.holdAutomaticSaves)
+        writer.saveAutomatic(Settings(names: ["dev.example.app": "Example"]))
+        expect(backing.data(forKey: SettingsStore.key), Data("bad json".utf8), "an automatic save does not overwrite the bad bytes")
+        let chosen = Settings(hidden: ["dev.example.app"], revealSeconds: 30)
+        writer.saveUserChange(chosen)
+        expect(store.load(), .loaded(chosen), "a later user change does save")
+        let named = Settings(hidden: ["dev.example.app"], revealSeconds: 30, names: ["dev.example.app": "Example"])
+        writer.saveAutomatic(named)
+        expect(store.load(), .loaded(named), "after a user change, automatic saves work again")
+        let normalWriter = SettingsWriter(store: store, holdAutomaticSaves: false)
+        normalWriter.saveAutomatic(Settings())
+        expect(store.load(), .loaded(Settings()), "a writer that holds nothing saves at once")
 
         // M4 review item 9: never-hide ids are dropped on load and the cleaned set is saved.
         store.save(Settings(hidden: ["com.apple.controlcenter", "dev.example.app"], revealSeconds: 30))

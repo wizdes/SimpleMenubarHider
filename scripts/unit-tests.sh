@@ -6,8 +6,10 @@ set -euo pipefail
 # What it does, in order:
 #   1. Checks the tools and the package before it builds anything.
 #   2. Runs `swift test` for Packages/SMHCore. That is one suite.
-#   3. Finds every guarded test file under App/ and runs it. That is one
-#      suite per file.
+#   3. Finds every guarded test file under App/ and runs the commands in
+#      its header. Each command that runs a test program from $DIR counts
+#      as one suite, so a file whose header runs its tests twice (Release
+#      and Debug rules) counts as two suites.
 #   4. Prints "UNIT PASS n suites", or prints each failure and exits 1.
 #
 # A guarded test file is a Swift file whose first lines hold
@@ -19,8 +21,9 @@ set -euo pipefail
 # runs those commands, so a new guarded file needs no change here.
 #
 # A guarded file fails loudly when its header has no commands, when no
-# command passes its -D flag, when no command names the file, or when the
-# last command does not run something from $DIR.
+# command passes its -D flag, when no command names the file, when the
+# last command does not run something from $DIR, or when its header says
+# "Run it twice" but runs a test program only once.
 #
 # Build output goes under build/unit-tests/ (build/ is git-ignored).
 # SMHCore builds in build/unit-tests/smhcore-build, which stays so the next
@@ -185,6 +188,37 @@ header_commands() {
   if [ -n "$pending" ]; then printf '%s\n' "$pending"; fi
 }
 
+# header_text <file>: prints every "//" line of the header block after the #if line.
+header_text() {
+  local line started=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$started" -eq 0 ]; then
+      case "$line" in
+        "#if "*) started=1 ;;
+      esac
+      continue
+    fi
+    case "$line" in
+      "//"*) printf '%s\n' "$line" ;;
+      *) break ;;
+    esac
+  done < "$1"
+}
+
+# is_run_command <command>: 0 when the command runs a program from $DIR,
+# after any leading NAME=value settings, such as
+# "DYLD_LIBRARY_PATH=$DIR $DIR/tests".
+is_run_command() {
+  local rest="$1"
+  while [[ "$rest" =~ ^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+(.*)$ ]]; do
+    rest="${BASH_REMATCH[1]}"
+  done
+  case "$rest" in
+    '$DIR/'*|'${DIR}/'*) return 0 ;;
+  esac
+  return 1
+}
+
 GUARDED=()
 while IFS= read -r f; do
   [ -n "$f" ] || continue
@@ -207,6 +241,10 @@ for rel in ${GUARDED[@]+"${GUARDED[@]}"}; do
 
   # Check the header before running anything from it.
   problem=""
+  runs=0
+  for c in ${cmds[@]+"${cmds[@]}"}; do
+    if is_run_command "$c"; then runs=$((runs + 1)); fi
+  done
   if [ "${#cmds[@]}" -eq 0 ]; then
     problem="no runnable command in its header (want lines that start with '//   ')"
   else
@@ -221,6 +259,9 @@ for rel in ${GUARDED[@]+"${GUARDED[@]}"}; do
         *'$DIR/'*|*'${DIR}/'*) ;;
         *) problem="the last header command does not run anything from \$DIR: $last" ;;
       esac
+      if [ -z "$problem" ] && [ "$runs" -lt 2 ] && header_text "$ROOT/$rel" | grep -qi "run it twice"; then
+        problem="its header says \"Run it twice\" but lists $runs command(s) that run a test program from \$DIR"
+      fi
     fi
   fi
   if [ -n "$problem" ]; then
@@ -230,24 +271,35 @@ for rel in ${GUARDED[@]+"${GUARDED[@]}"}; do
 
   mkdir -p "$dir"
   : > "$log_file"
-  ok=1
-  out=""
+  cmd_log="$RUN_DIR/$name.cmd.log"
+  run=0
+  failed_here=0
   for c in "${cmds[@]}"; do
+    # Commands before a run belong to that run, such as the compile step.
+    run_name="$rel"
+    if [ "$runs" -gt 1 ]; then run_name="$rel run $((run + 1))/$runs"; fi
     printf '$ %s\n' "$c" >> "$log_file"
     rc=0
-    (cd "$ROOT" && DIR="$dir" bash -c "set -euo pipefail; $c") >>"$log_file" 2>&1 || rc=$?
+    (cd "$ROOT" && DIR="$dir" bash -c "set -euo pipefail; $c") >"$cmd_log" 2>&1 || rc=$?
+    cat "$cmd_log" >> "$log_file"
     if [ "$rc" -ne 0 ]; then
-      ok=0
-      out="exit $rc from: $c"
+      suite_fail "$run_name" "exit $rc from: $c (log $log_file)"
+      tail_of "$log_file"
+      failed_here=1
+      run=$((run + 1))
       break
     fi
+    if is_run_command "$c"; then
+      run=$((run + 1))
+      suite_pass "$run_name" "$(tail -n 1 "$cmd_log" || true)"
+    fi
   done
-  if [ "$ok" -eq 1 ]; then
-    suite_pass "$rel" "$(tail -n 1 "$log_file" || true)"
-  else
-    suite_fail "$rel" "$out (log $log_file)"
-    tail_of "$log_file"
-  fi
+  # Runs after a failed command did not happen; they count as failures.
+  while [ "$failed_here" -eq 1 ] && [ "$run" -lt "$runs" ]; do
+    run=$((run + 1))
+    suite_fail "$rel run $run/$runs" "not run, because an earlier command failed"
+  done
+  rm -f "$cmd_log"
 done
 
 # ------------------------------------------------------------------- result ---

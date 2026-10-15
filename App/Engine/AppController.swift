@@ -10,6 +10,8 @@ final class AppController: NSObject, NSApplicationDelegate {
     private static let menuBarAgentID = "com.apple.MenuBarAgent"
     private let logger = Logger(subsystem: "dev.yili.smh", category: "controller")
     private let store = SettingsStore(store: UserDefaultsStore(defaults: .standard))
+    /// Holds automatic saves while unreadable settings could not be copied aside (set at launch).
+    private lazy var writer = SettingsWriter(store: store, holdAutomaticSaves: false)
     private let engine = HidingEngine(shim: SMHMenuBarShim())
     private let popoverModel = PopoverModel()
     private lazy var status = StatusItemController(model: popoverModel)
@@ -29,10 +31,13 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var agentRestart = ProcessRestartDetector()
     private var agentPollTimer: Timer?
     private var agentReapplyTimer: Timer?
+    /// Wake and display changes come in bursts; they force one apply 0.5 s after the last one.
+    private var systemDebounce = BurstDebounce()
+    private var systemChangeTimer: Timer?
     private var scans = ScanSequence()
     private var scanCompletions: [() -> Void] = []
-    /// Monotonic time of the last popover open (or Accessibility button press) while untrusted.
-    private var untrustedOpenAt: TimeInterval?
+    /// Spots the Accessibility grant, and whether the user opened the popover while untrusted.
+    private var trustWatch = TrustWatch(trusted: false)
     private var openingAutomatically = false
     private var settingsLineShown = false
     private var runningAppsObservation: NSKeyValueObservation?
@@ -46,17 +51,21 @@ final class AppController: NSObject, NSApplicationDelegate {
             try SettingsBackup.write(data, to: try SettingsRecovery.backupFolder(), now: Date())
         }
         settings = recovered.settings
+        writer = SettingsWriter(store: store, holdAutomaticSaves: recovered.holdAutomaticSaves)
         pause = PauseState(user: settings.paused)
         firstLaunch = recovered.firstLaunch
         settingsNote = recovered.note
         if !settingsNote.isEmpty {
-            logger.error("settings corrupt, reset to defaults: \(self.settingsNote, privacy: .public)")
-            if let url = recovered.backupURL {
-                logger.error("saved the unreadable settings to \(url.path, privacy: .public)")
-            } else if let error = recovered.backupError {
-                logger.error("could not save a copy of the unreadable settings: \(error, privacy: .public)")
+            if let error = recovered.backupError {
+                logger.error("settings corrupt and could not be copied (\(error, privacy: .public)); left as they are, using defaults in memory until the user changes a setting: \(self.settingsNote, privacy: .public)")
+                popoverModel.settingsResetLine = PopoverText.settingsLeft(backupError: error)
+            } else {
+                logger.error("settings corrupt, reset to defaults: \(self.settingsNote, privacy: .public)")
+                if let url = recovered.backupURL {
+                    logger.error("saved the unreadable settings to \(url.path, privacy: .public)")
+                }
+                popoverModel.settingsResetLine = PopoverText.settingsReset(backupError: nil)
             }
-            popoverModel.settingsResetLine = PopoverText.settingsReset(backupError: recovered.backupError)
         }
         if !recovered.droppedNeverHide.isEmpty {
             logger.notice("removed ids SMH never hides from the hidden set: \(recovered.droppedNeverHide.joined(separator: ","), privacy: .public)")
@@ -76,6 +85,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         syncPopover()
         updateCompetitors()
         popoverModel.trusted = AXIsProcessTrusted()
+        trustWatch = TrustWatch(trusted: popoverModel.trusted)
         // Launch and terminate notifications skip agent (LSUIElement) apps, which most menu bar apps are.
         // Observing runningApplications sees every app.
         runningAppsObservation = NSWorkspace.shared.observe(\.runningApplications, options: [.new, .old]) { [weak self] _, change in
@@ -103,7 +113,9 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         receive(.quitRequested)
-        for timer in [revealTimer, appChangeTimer, retryTimer, agentPollTimer, agentReapplyTimer, trustTimer] { timer?.invalidate() }
+        for timer in [revealTimer, appChangeTimer, retryTimer, agentPollTimer, agentReapplyTimer, systemChangeTimer, trustTimer] {
+            timer?.invalidate()
+        }
         runningAppsObservation?.invalidate()
         runningAppsObservation = nil
         NSWorkspace.shared.notificationCenter.removeObserver(self)
@@ -129,11 +141,35 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     /// Wake and display changes: the system may have dropped the assertion, so apply again even if the list is unchanged.
+    /// A burst of them forces one apply, 0.5 s after the last one.
     @objc private func systemChanged(_ notification: Notification) {
-        logger.info("system change: \(notification.name.rawValue, privacy: .public); forcing apply")
+        logger.info("system change: \(notification.name.rawValue, privacy: .public); forcing apply after 0.5 s without more changes")
         updateCompetitors()
-        receive(.systemChanged)
-        scanApps()
+        if let delay = systemDebounce.event(now: ProcessInfo.processInfo.systemUptime) {
+            scheduleSystemChangeTimer(after: delay)
+        }
+    }
+
+    private func scheduleSystemChangeTimer(after delay: TimeInterval) {
+        let timer = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.systemChangeTimerFired() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        systemChangeTimer = timer
+    }
+
+    private func systemChangeTimerFired() {
+        systemChangeTimer = nil
+        switch systemDebounce.timerFired(now: ProcessInfo.processInfo.systemUptime) {
+        case .act:
+            logger.info("system changes settled; forcing apply")
+            receive(.systemChanged)
+            scanApps()
+        case .wait(let delay):
+            scheduleSystemChangeTimer(after: delay)
+        case .idle:
+            break
+        }
     }
 
     /// MenuBarAgent shows up in NSWorkspace.runningApplications on macOS 27.0.1 (26A434), so the
@@ -270,7 +306,7 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     func setHidden(_ hidden: Set<String>, completion: @escaping () -> Void) {
         settings.hidden = hidden
-        store.save(settings)
+        writer.saveUserChange(settings)
         syncPopover()
         receive(.hiddenSetChanged, completion: completion)
     }
@@ -283,19 +319,27 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     func setRevealSeconds(_ seconds: Double) {
         settings.revealSeconds = seconds
-        store.save(settings)
+        writer.saveUserChange(settings)
         syncPopover()
     }
 
     func setPaused(_ paused: Bool, completion: @escaping () -> Void) {
         settings.paused = paused
-        store.save(settings)
+        writer.saveUserChange(settings)
         _ = pause.setUser(paused)
         syncPopover()
         receive(.pauseToggled(now: Date()), completion: completion)
     }
 
     func togglePause() { setPaused(!settings.paused) {} }
+
+    #if DEBUG
+    /// Debug command `failNextApplies`: the next `count` applies fail before they reach the shim.
+    func failNextApplies(_ count: Int) {
+        logger.notice("debug: the next \(count) applies will fail")
+        engine.failNextApplies(count)
+    }
+    #endif
 
     func openPopover() { status.openPopover() }
     func closePopover() { status.closePopover() }
@@ -330,7 +374,9 @@ final class AppController: NSObject, NSApplicationDelegate {
                 }
                 if names != self.settings.names {
                     self.settings.names = names
-                    self.store.save(self.settings)
+                    if !self.writer.saveAutomatic(self.settings) {
+                        self.logger.notice("app names not saved: the unreadable settings are kept until a setting changes")
+                    }
                     self.popoverModel.names = names
                 }
             }
@@ -344,7 +390,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     private func popoverOpened() {
         popoverModel.trusted = AXIsProcessTrusted()
         if !popoverModel.trusted && !openingAutomatically {
-            untrustedOpenAt = ProcessInfo.processInfo.systemUptime
+            trustWatch.openedWhileUntrusted(now: ProcessInfo.processInfo.systemUptime)
         }
         if popoverModel.settingsResetLine != nil { settingsLineShown = true }
         popoverModel.loginError = nil
@@ -360,24 +406,27 @@ final class AppController: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// The grant is judged from TrustWatch's own last value, which only this check updates,
+    /// so a scan or popover open that already set `popoverModel.trusted` cannot hide it.
     private func checkTrust() {
         let trusted = AXIsProcessTrusted()
-        if trusted && !popoverModel.trusted {
+        if let reopen = trustWatch.check(trusted: trusted, now: ProcessInfo.processInfo.systemUptime) {
             popoverModel.trusted = true
-            let reopen = TrustReopen.shouldReopen(openedUntrustedAt: untrustedOpenAt, now: ProcessInfo.processInfo.systemUptime)
-            untrustedOpenAt = nil
             logger.info("Accessibility granted; rescanning; reopen popover: \(reopen)")
             scanApps { [weak self] in
                 guard let self, reopen else { return }
                 self.status.closePopover()
                 self.openPopoverAutomatically()
             }
+        } else if trusted && !popoverModel.trusted {
+            popoverModel.trusted = true
+            scanApps()
         } else if !trusted { popoverModel.trusted = false }
     }
 
     private func openAccessibilitySettings() {
         // The user acted in the popover while untrusted, so reopen it once access is granted.
-        untrustedOpenAt = ProcessInfo.processInfo.systemUptime
+        trustWatch.openedWhileUntrusted(now: ProcessInfo.processInfo.systemUptime)
         let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
         AXIsProcessTrustedWithOptions(options)
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {

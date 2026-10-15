@@ -48,6 +48,11 @@ final class PopoverModel: ObservableObject {
 
     var delayTrailing: String { "\(RevealDelayChoice.label(for: revealSeconds))  ›" }
 
+    /// The Pause Hiding row: checked for either pause, with "<Name> running" while a competing hider pauses SMH.
+    var pauseRow: PauseRow {
+        PauseRow(userPaused: paused, competitorName: pausedForConflict ? competitors.first?.name : nil)
+    }
+
     /// Width of the widest row, like a native menu. See PopoverLayout.width.
     var contentWidth: CGFloat {
         func measure(_ text: String, _ size: CGFloat) -> CGFloat {
@@ -57,6 +62,9 @@ final class PopoverModel: ObservableObject {
         // 16 pt is the row's minimum gap; 12 pt more covers SwiftUI drawing wider than NSString measures (the title was cut off).
         widest = max(widest, measure(Self.delayTitle, 13) + 16 + 12 + measure(delayTrailing, 13))
         for title in Self.actionTitles { widest = max(widest, measure(title, 13)) }
+        if let trailing = pauseRow.trailing {
+            widest = max(widest, measure(Self.actionTitles[1], 13) + 16 + 12 + measure(trailing, 11))
+        }
         if trusted {
             for row in rows {
                 widest = max(widest, measure(row.name, 13) + (row.isRunning ? 0 : 4 + measure("not running", 10)))
@@ -92,7 +100,7 @@ final class PopoverModel: ObservableObject {
         switch row {
         case .delay: showDelayMenu()
         case .launchAtLogin: setLaunchAtLogin?(!launchAtLogin)
-        case .pause: setPaused?(!paused)
+        case .pause: setPaused?(pauseRow.clickSetsUserPause)
         case .quit: quit?()
         }
     }
@@ -195,7 +203,8 @@ struct PopoverView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, edge).padding(.bottom, 4)
             }
-            actionRow(.pause, PopoverModel.actionTitles[1], checked: model.paused)
+            let pauseRow = model.pauseRow
+            actionRow(.pause, PopoverModel.actionTitles[1], checked: pauseRow.checked, trailing: pauseRow.trailing)
             Divider().padding(.vertical, 5)
             actionRow(.quit, PopoverModel.actionTitles[2], checked: false)
             if model.footerVisible {
@@ -275,14 +284,15 @@ struct PopoverView: View {
         }
     }
 
-    private func menuRow(_ row: GeneralRow, _ title: String, trailing: String? = nil, checked: Bool = false) -> some View {
+    private func menuRow(_ row: GeneralRow, _ title: String, trailing: String? = nil, trailingSize: CGFloat = 13,
+                         checked: Bool = false) -> some View {
         let selected = model.isHighlighted(row.rawValue)
         return HStack(spacing: 0) {
             Text(checked ? "✓" : " ").frame(width: PopoverLayout.checkColumn, alignment: .leading)
             Text(title).lineLimit(1)
             Spacer(minLength: 16)
             if let trailing {
-                Text(trailing).lineLimit(1)
+                Text(trailing).font(.system(size: trailingSize)).lineLimit(1)
                     .foregroundStyle(selected ? Color.white : Color.secondary)
             }
         }
@@ -294,14 +304,15 @@ struct PopoverView: View {
         .foregroundStyle(selected ? .white : .primary)
     }
 
-    private func actionRow(_ row: GeneralRow, _ title: String, checked: Bool) -> some View {
-        Button { model.activate(row) } label: { menuRow(row, title, checked: checked) }
+    /// `trailing` is small secondary text at the right, such as "Thaw running" on the Pause row.
+    private func actionRow(_ row: GeneralRow, _ title: String, checked: Bool, trailing: String? = nil) -> some View {
+        Button { model.activate(row) } label: { menuRow(row, title, trailing: trailing, trailingSize: 11, checked: checked) }
             .buttonStyle(.plain)
             .focusable(false)
             .onContinuousHover { phase in model.pointer(phase, over: row.rawValue) }
             .padding(.horizontal, PopoverLayout.listInset)
             .accessibilityLabel(title)
-            .accessibilityValue(checked ? "checked" : "unchecked")
+            .accessibilityValue((checked ? "checked" : "unchecked") + (trailing.map { ", \($0)" } ?? ""))
     }
 
     /// A plain row; clicking it pops up a native menu of delays at the row's right edge.

@@ -23,7 +23,7 @@ guard let cmd = tokens.first, !cmd.hasPrefix("-") else {
 }
 tokens.removeFirst()
 
-let commandsWithArg: Set<String> = ["setHidden", "setRevealSeconds", "toggleApp"]
+let commandsWithArg: Set<String> = ["setHidden", "setRevealSeconds", "toggleApp", "failNextApplies"]
 let commandsWithoutArg: Set<String> = ["openPopover", "closePopover", "scan", "reveal", "pause", "resume", "state", "quit"]
 guard commandsWithArg.contains(cmd) || commandsWithoutArg.contains(cmd) else {
     usageError("unknown command: \(cmd)")

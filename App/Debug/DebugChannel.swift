@@ -63,6 +63,14 @@ final class DebugChannel: NSObject {
             controller.scanApps { [weak self] in
                 self?.sendReply(id: id, extra: ["found": controller.scanFound])
             }
+        case "failNextApplies":
+            guard let arg = values["arg"], let count = Int(arg), count >= 0 else {
+                logger.error("failNextApplies needs a whole number 0 or more")
+                reply()
+                return
+            }
+            controller.failNextApplies(count)
+            reply()
         case "state": reply()
         case "quit":
             controller.receive(.quitRequested)
