@@ -23,7 +23,7 @@ done
 pass
 
 step='tool checks'
-for tool in git xcodegen xcodebuild codesign ditto xcrun spctl shasum rg python3; do
+for tool in git xcodegen xcodebuild codesign ditto xcrun spctl shasum rg python3 file find sort; do
   command -v "$tool" >/dev/null 2>&1 || fail "missing tool: $tool"
 done
 [[ -x /usr/libexec/PlistBuddy ]] || fail 'missing tool: /usr/libexec/PlistBuddy'
@@ -53,7 +53,27 @@ release_dir="$repo_root/build/release"
 derived_data="$release_dir/DerivedData"
 app="$derived_data/Build/Products/Release/Simple Menubar Hider.app"
 zip="$release_dir/SimpleMenubarHider-$version.zip"
+signing_identity='Developer ID Application: Yi Li (8Q5V8XK85Y)'
+
+step='clean release folder'
+[[ -n "$repo_root" && "$repo_root" != / ]] || fail "bad repo root: $repo_root"
+[[ "$release_dir" == "$repo_root/build/release" && "$release_dir" == */build/release ]] || fail "refusing to delete unexpected path: $release_dir"
+if [[ -e "$release_dir" ]]; then
+  rm -rf -- "$release_dir"
+fi
+[[ ! -e "$release_dir" ]] || fail "could not delete $release_dir"
 mkdir -p "$release_dir"
+pass
+
+# Print every Mach-O file under the app, deepest path first, one per line.
+list_macho() {
+  local path
+  find "$app" -type f -print0 | while IFS= read -r -d '' path; do
+    if [[ "$(file -b -- "$path")" == *'Mach-O'* ]]; then
+      printf '%s\t%s\n' "$(tr -cd / <<< "$path" | wc -c | tr -d ' ')" "$path"
+    fi
+  done | sort -t "$(printf '\t')" -k1,1nr | cut -f2-
+}
 
 step='generate Xcode project'
 xcodegen generate
@@ -64,11 +84,34 @@ xcodebuild -project SimpleMenubarHider.xcodeproj -scheme SimpleMenubarHider \
   -configuration Release -derivedDataPath "$derived_data" \
   MARKETING_VERSION="$version" CURRENT_PROJECT_VERSION="$commit_count" \
   INFOPLIST_KEY_CFBundleShortVersionString="$version" \
-  INFOPLIST_KEY_CFBundleVersion="$commit_count" build
+  INFOPLIST_KEY_CFBundleVersion="$commit_count" \
+  CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
+  OTHER_CODE_SIGN_FLAGS='--timestamp --options=runtime' build
 [[ -d "$app" ]] || fail "built app missing: $app"
 info="$app/Contents/Info.plist"
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$info")" == "$version" ]] || fail 'app version does not match VERSION'
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$info")" == "$commit_count" ]] || fail 'app build number does not match the git commit count'
+pass
+
+step='timestamp nested code'
+main_executable="$app/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$info")"
+[[ -f "$main_executable" ]] || fail "main executable missing: $main_executable"
+macho_list="$release_dir/macho-files.txt"
+list_macho > "$macho_list"
+[[ -s "$macho_list" ]] || fail 'no Mach-O files found in app'
+resigned=false
+while IFS= read -r path; do
+  [[ "$path" != "$main_executable" ]] || continue
+  if ! details="$(codesign -dvv -- "$path" 2>&1)" || [[ "$details" != *$'\n''Timestamp='* ]]; then
+    printf 'RESIGN: %s\n' "$path"
+    codesign --force --timestamp --options runtime --preserve-metadata=entitlements,requirements --sign "$signing_identity" -- "$path"
+    resigned=true
+  fi
+done < "$macho_list"
+if [[ "$resigned" == true ]]; then
+  printf 'RESIGN: %s\n' "$app"
+  codesign --force --timestamp --options runtime --preserve-metadata=entitlements,requirements --sign "$signing_identity" -- "$app"
+fi
 pass
 
 step='release leak scan'
@@ -96,6 +139,36 @@ pass
 
 step='verify code signature'
 codesign --verify --deep --strict --verbose=2 "$app"
+list_macho > "$macho_list"
+[[ -s "$macho_list" ]] || fail 'no Mach-O files found in app'
+bad_signature=false
+while IFS= read -r path; do
+  if ! details="$(codesign -dvv -- "$path" 2>&1)"; then
+    printf 'BAD SIGNATURE: %s: not signed\n' "$path" >&2
+    bad_signature=true
+    continue
+  fi
+  if ! path_entitlements="$(codesign -d --entitlements - -- "$path" 2>&1)"; then
+    printf 'BAD SIGNATURE: %s: cannot read entitlements\n' "$path" >&2
+    bad_signature=true
+  elif [[ "$path_entitlements" == *'com.apple.security.get-task-allow'* ]]; then
+    printf 'BAD SIGNATURE: %s: has com.apple.security.get-task-allow\n' "$path" >&2
+    bad_signature=true
+  fi
+  if [[ "$details" != *$'\n''Timestamp='* ]]; then
+    printf 'BAD SIGNATURE: %s: no secure timestamp\n' "$path" >&2
+    bad_signature=true
+  fi
+  if [[ "$details" != *'flags='*'(runtime)'* ]]; then
+    printf 'BAD SIGNATURE: %s: hardened runtime flag is missing\n' "$path" >&2
+    bad_signature=true
+  fi
+  if [[ "$details" != *$'\n'"Authority=$signing_identity"$'\n'* ]]; then
+    printf 'BAD SIGNATURE: %s: authority is not %s\n' "$path" "$signing_identity" >&2
+    bad_signature=true
+  fi
+done < "$macho_list"
+[[ "$bad_signature" == false ]] || fail 'Mach-O signature checks failed'
 signature="$(codesign -dv --verbose=4 "$app" 2>&1)"
 [[ "$signature" == *'Authority=Developer ID Application:'* ]] || fail 'signature is not Developer ID Application'
 [[ "$signature" == *'TeamIdentifier=8Q5V8XK85Y'* ]] || fail 'signature has the wrong team'
