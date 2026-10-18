@@ -211,7 +211,7 @@ struct PopoverView: View {
             Divider().padding(.vertical, 5)
             actionRow(.quit, PopoverModel.actionTitles[2], checked: false)
             if model.footerVisible {
-                Text("The Focus (moon) icon also hides while hiding is on. This is a macOS limit.")
+                Text("The Focus icon is also hidden (macOS 27 limit).")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, edge).padding(.top, 6).padding(.bottom, 9)
