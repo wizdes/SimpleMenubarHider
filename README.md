@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/images/app-icon.png" alt="Simple Menubar Hider app icon" width="128">
+
 # Simple Menubar Hider
 
 Hide the menu bar icons you don't need. Click once to see them again.
@@ -17,19 +19,19 @@ Hide the menu bar icons you don't need. Click once to see them again.
 <table>
 <tr>
 <td align="center">
-<img src="docs/images/bar-before.png" alt="Menu bar before hiding, showing the SMH outline circle icon with CatPad, Tailscale and Plex icons" width="500"><br>
+<img src="docs/images/bar-before.png" alt="Menu bar before hiding, showing the SMH outline circle icon with CatPad and Plex icons" width="500"><br>
 Before
 </td>
 </tr>
 <tr>
 <td align="center">
-<img src="docs/images/bar-after.png" alt="Menu bar after hiding CatPad, Tailscale and Plex. The SMH circle icon is filled in, and the Focus moon icon is also gone" width="500"><br>
+<img src="docs/images/bar-after.png" alt="Menu bar after hiding CatPad and Plex. The SMH circle icon is filled in, and the Focus moon icon is also gone" width="500"><br>
 After
 </td>
 </tr>
 <tr>
 <td align="center">
-<img src="docs/images/bar-reveal.png" alt="Menu bar after a left-click on the circle. All icons, including CatPad, Tailscale and Plex, show again" width="500"><br>
+<img src="docs/images/bar-reveal.png" alt="Menu bar after a left-click on the circle. All icons, including CatPad and Plex, show again" width="500"><br>
 Left-click: icons show until the delay ends
 </td>
 </tr>
