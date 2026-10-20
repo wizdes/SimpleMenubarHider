@@ -17,19 +17,19 @@ Hide the menu bar icons you don't need. Click once to see them again.
 <table>
 <tr>
 <td align="center">
-<img src="docs/images/bar-before.png" alt="Menu bar before hiding, showing SMH eye icon with CatPad, Tailscale and Plex icons" width="500"><br>
+<img src="docs/images/bar-before.png" alt="Menu bar before hiding, showing the SMH outline circle icon with CatPad, Tailscale and Plex icons" width="500"><br>
 Before
 </td>
 </tr>
 <tr>
 <td align="center">
-<img src="docs/images/bar-after.png" alt="Menu bar after hiding CatPad, Tailscale and Plex. The SMH eye icon is crossed out, and the Focus moon icon is also gone" width="500"><br>
+<img src="docs/images/bar-after.png" alt="Menu bar after hiding CatPad, Tailscale and Plex. The SMH circle icon is filled in, and the Focus moon icon is also gone" width="500"><br>
 After
 </td>
 </tr>
 <tr>
 <td align="center">
-<img src="docs/images/bar-reveal.png" alt="Menu bar after a left-click on the eye. All icons, including CatPad, Tailscale and Plex, show again" width="500"><br>
+<img src="docs/images/bar-reveal.png" alt="Menu bar after a left-click on the circle. All icons, including CatPad, Tailscale and Plex, show again" width="500"><br>
 Left-click: icons show until the delay ends
 </td>
 </tr>
@@ -47,7 +47,7 @@ Requirements: macOS 27 or later, on a Mac with Apple silicon. The app does not r
 
 1. Download the zip from [GitHub Releases](https://github.com/wizdes/SimpleMenubarHider/releases/latest) and unzip it.
 2. Move `Simple Menubar Hider.app` to `/Applications`. SMH will not hide icons when run from elsewhere.
-3. Open the app. An eye icon appears in the menu bar, and the popover opens by itself the first time.
+3. Open the app. A circle icon appears in the menu bar, and the popover opens by itself the first time.
 4. In the popover, click **Open Accessibility Settings** and turn on Simple Menubar Hider. SMH needs this to list apps with menu bar icons. Hiding itself does not use Accessibility.
 5. Tick the apps whose icons you want to hide.
 
@@ -55,19 +55,19 @@ The app is signed and notarized by Apple, so it opens without a Gatekeeper warni
 
 ## Use
 
-Right-click (or Control-click) the eye icon to open the popover. Tick the apps you want to hide. Left-click the eye to show the hidden icons. They hide again when the delay ends. Set the delay with Hide Again After; the default is 10 seconds.
+Right-click (or Control-click) the circle icon to open the popover. Tick the apps you want to hide. Left-click the circle to show the hidden icons. They hide again when the delay ends. Set the delay with Hide Again After; the default is 10 seconds.
 
 The popover also has Launch at Login, Pause Hiding and Quit Simple Menubar Hider.
 
 | Click | What happens |
 | ----- | ------------ |
-| Right-click or Control-click the eye | Opens the popover to pick apps |
-| Left-click the eye | Shows hidden icons until the delay ends |
+| Right-click or Control-click the circle | Opens the popover to pick apps |
+| Left-click the circle | Shows hidden icons until the delay ends |
 | Left-click again while they show | Hides them again at once |
 
 <div align="center">
 <img src="docs/images/popover.png" alt="SMH popover listing apps, with check marks next to CatPad, Plex Media Server and Tailscale, then Hide Again After, Launch at Login, Pause Hiding, Quit, and the note: The Focus icon is also hidden (macOS 27 limit)" width="329"><br>
-Right-click the eye to pick apps
+Right-click the circle to pick apps
 </div>
 
 ## Permissions and privacy

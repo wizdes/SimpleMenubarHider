@@ -42,8 +42,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     func render(state: BarState, hiddenCount: Int, paused: Bool) {
         let symbol: String
         switch state {
-        case .collapsed: symbol = "eye.slash"
-        case .expanded, .revealing: symbol = "eye"
+        case .collapsed: symbol = "circle.fill"
+        case .expanded, .revealing: symbol = "circle"
         case .unavailable: symbol = "exclamationmark.triangle"
         }
         let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Simple Menubar Hider")

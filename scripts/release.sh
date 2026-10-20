@@ -91,6 +91,8 @@ xcodebuild -project SimpleMenubarHider.xcodeproj -scheme SimpleMenubarHider \
 info="$app/Contents/Info.plist"
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$info")" == "$version" ]] || fail 'app version does not match VERSION'
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$info")" == "$commit_count" ]] || fail 'app build number does not match the git commit count'
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$info" 2>/dev/null || true)" == AppIcon ]] || fail 'app icon name missing from Info.plist'
+[[ -f "$app/Contents/Resources/AppIcon.icns" && -f "$app/Contents/Resources/Assets.car" ]] || fail 'app icon files missing from Resources'
 pass
 
 step='timestamp nested code'
