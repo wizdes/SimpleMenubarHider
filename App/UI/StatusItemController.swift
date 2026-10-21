@@ -46,7 +46,10 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         case .expanded, .revealing: symbol = "circle"
         case .unavailable: symbol = "exclamationmark.triangle"
         }
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Simple Menubar Hider")
+        // A little smaller than the default symbol size, so the circle sits level with the icons next to it.
+        let size = NSImage.SymbolConfiguration(pointSize: 11, weight: .regular)
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Simple Menubar Hider")?
+            .withSymbolConfiguration(size)
         image?.isTemplate = true
         statusItem.button?.image = image
     }
