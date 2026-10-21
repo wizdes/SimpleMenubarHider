@@ -29,6 +29,7 @@ struct PopoverRulesTests {
         keysToggleOnlyAfterUserMovesHighlight()
         hoverArmsAndLeavingClears()
         rowsUseRealRunningSetAndSkipSystemApps()
+        outsideApplicationsRules()
         scanSkipsSystemApps()
         widthFitsWidestRow()
         revealDelayLabels()
@@ -105,12 +106,40 @@ struct PopoverRulesTests {
             scanned: scanned,
             hidden: ["com.example.slow", "com.example.gone", "com.apple.controlcenter"],
             names: ["com.example.slow": "Slow App", "com.example.gone": "Gone App"],
-            running: ["com.example.catpad", "com.example.slow", "com.apple.MenuBarAgent"])
+            running: ["com.example.catpad", "com.example.slow", "com.apple.MenuBarAgent"], outside: [])
         expect(rows.map(\.bundleID), ["com.example.catpad", "com.example.gone", "com.example.slow"],
                "rows are sorted by name and skip Apple system processes")
         expect(rows.map(\.isRunning), [true, false, true],
                "an app that answered AX slowly is still running; a quit app is not")
         expect(rows.map(\.name), ["CatPad", "Gone App", "Slow App"], "saved names fill in unscanned apps")
+    }
+
+    static func outsideApplicationsRules() {
+        expect(PopoverRows.isOutsideApplications(bundlePath: nil), false, "a missing path is unknown")
+        expect(PopoverRows.isOutsideApplications(bundlePath: "/Applications/X.app"), false, "app in Applications")
+        expect(PopoverRows.isOutsideApplications(bundlePath: "/Applications/Sub/X.app"), false, "app in an Applications subfolder")
+        expect(PopoverRows.isOutsideApplications(bundlePath: "/Users/yili/Applications/X.app"), true, "app in a home Applications folder")
+        expect(PopoverRows.isOutsideApplications(bundlePath: "/ApplicationsOther/X.app"), true, "a similar prefix is outside")
+        expect(PopoverRows.isOutsideApplications(bundlePath: "/Volumes/CatPad/CatPad.app"), true, "app on a disk image")
+
+        let scanned = [MenuBarApp(bundleID: "running", name: "Running"),
+                       MenuBarApp(bundleID: "stopped", name: "Stopped")]
+        let rows = PopoverRows.build(scanned: scanned, hidden: [], names: [:],
+                                     running: ["running"], outside: ["running", "stopped", "absent"])
+        expect(rows.map(\.outsideApplications), [true, false], "only a running row carries the outside flag")
+        expect(rows.map(\.bundleID), ["running", "stopped"], "an outside app missing from the scan adds no row")
+        expect(PopoverRows.outsideNoteVisible(rows: rows, hidden: []), true, "an unchecked outside app shows the note")
+        expect(PopoverRows.outsideNoteVisible(rows: rows, hidden: ["running"]), false, "a checked outside app does not show the note")
+        let noOutside = PopoverRows.build(scanned: scanned, hidden: [], names: [:],
+                                          running: ["running"], outside: [])
+        expect(PopoverRows.outsideNoteVisible(rows: noOutside, hidden: []), false, "no outside app hides the note")
+        let stoppedOutside = PopoverRows.build(scanned: scanned, hidden: [], names: [:],
+                                               running: [], outside: ["running"])
+        expect(PopoverRows.outsideNoteVisible(rows: stoppedOutside, hidden: []), false, "an outside app that stopped hides the note")
+        expect(PopoverText.outsideTrailing, "outside /Applications", "outside row text")
+        expect(PopoverText.outsideNote,
+               "Apps outside /Applications are hidden too (macOS\u{00A0}27 limit). Move them to /Applications.",
+               "outside footer text")
     }
 
     static func scanSkipsSystemApps() {

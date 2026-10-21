@@ -85,10 +85,20 @@ struct PopoverRow: Equatable, Identifiable {
     let bundleID: String
     let name: String
     let isRunning: Bool
+    let outsideApplications: Bool
     var id: String { bundleID }
 }
 
 enum PopoverRows {
+    static func isOutsideApplications(bundlePath: String?) -> Bool {
+        guard let bundlePath else { return false }
+        return !bundlePath.hasPrefix("/Applications/")
+    }
+
+    static func outsideNoteVisible(rows: [PopoverRow], hidden: Set<String>) -> Bool {
+        rows.contains { $0.isRunning && $0.outsideApplications && !hidden.contains($0.bundleID) }
+    }
+
     /// The view shows app rows only when trusted and not on the first scan's spinner.
     static func showsAppRows(trusted: Bool, scanning: Bool, scannedIsEmpty: Bool) -> Bool {
         trusted && !(scanning && scannedIsEmpty)
@@ -112,7 +122,7 @@ enum PopoverRows {
     /// `running` is the real set of running bundle ids, because an app that answers
     /// Accessibility slowly is missing from the scan but still running.
     static func build(scanned: [MenuBarApp], hidden: Set<String>, names: [String: String],
-                      running: Set<String>) -> [PopoverRow] {
+                      running: Set<String>, outside: Set<String>) -> [PopoverRow] {
         var byID: [String: MenuBarApp] = [:]
         for app in visibleScan(scanned) { byID[app.bundleID] = app }
         for id in hidden where byID[id] == nil && !AllowList.neverHide.contains(id) {
@@ -121,7 +131,11 @@ enum PopoverRows {
         return byID.values.sorted {
             let order = $0.name.localizedCaseInsensitiveCompare($1.name)
             return order == .orderedSame ? $0.bundleID < $1.bundleID : order == .orderedAscending
-        }.map { PopoverRow(bundleID: $0.bundleID, name: $0.name, isRunning: running.contains($0.bundleID)) }
+        }.map {
+            let isRunning = running.contains($0.bundleID)
+            return PopoverRow(bundleID: $0.bundleID, name: $0.name, isRunning: isRunning,
+                              outsideApplications: isRunning && outside.contains($0.bundleID))
+        }
     }
 }
 
@@ -239,6 +253,9 @@ struct SizeUpdateThrottle: Equatable {
 }
 
 enum PopoverText {
+    static let outsideTrailing = "outside /Applications"
+    static let outsideNote = "Apps outside /Applications are hidden too (macOS\u{00A0}27 limit). Move them to /Applications."
+
     static func conflict(name: String) -> String {
         "\(name) is also hiding menu bar icons, so SMH has paused. Quit \(name) to use SMH."
     }

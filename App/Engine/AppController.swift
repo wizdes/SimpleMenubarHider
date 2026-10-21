@@ -389,6 +389,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             self.popoverModel.trusted = apps != nil
             self.popoverModel.scanning = false
             self.popoverModel.running = Self.runningBundleIDs()
+            self.popoverModel.outside = Self.runningOutsideApplications()
             if let apps {
                 self.popoverModel.apps = apps
                 // Save only when a hidden app's name changed, so opening the popover never writes settings.
@@ -474,6 +475,15 @@ final class AppController: NSObject, NSApplicationDelegate {
         Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
     }
 
+    private static func runningOutsideApplications() -> Set<String> {
+        let ownID = Bundle.main.bundleIdentifier
+        return Set(NSWorkspace.shared.runningApplications.compactMap { app in
+            guard let id = app.bundleIdentifier, id != ownID,
+                  PopoverRows.isOutsideApplications(bundlePath: app.bundleURL?.path) else { return nil }
+            return id
+        })
+    }
+
     /// A running competitor pauses SMH (release, expanded); its quit resumes SMH unless the user paused.
     private func updateCompetitors() {
         let competitors = ConflictDetector.detect(
@@ -502,6 +512,7 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     private func syncPopover() {
         popoverModel.running = Self.runningBundleIDs()
+        popoverModel.outside = Self.runningOutsideApplications()
         popoverModel.hidden = settings.hidden
         popoverModel.names = settings.names
         popoverModel.revealSeconds = settings.revealSeconds
@@ -525,6 +536,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         case .unavailable(let reason): stateString = "unavailable:\(StatusItemController.warningText(reason))"
         }
         return ["state": stateString, "hidden": settings.hidden.sorted().joined(separator: ","),
+                "outside": Self.runningOutsideApplications().sorted().joined(separator: ","),
                 "allowCount": String(engine.allowCount), "applied": engine.isApplied ? "yes" : "no",
                 "applyCount": String(engine.applyCount),
                 "conflict": popoverModel.competitors.map(\.bundleID).joined(separator: ","),

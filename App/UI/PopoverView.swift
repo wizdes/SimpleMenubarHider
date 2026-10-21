@@ -10,6 +10,7 @@ final class PopoverModel: ObservableObject {
 
     @Published var apps: [MenuBarApp] = []
     @Published var running: Set<String> = []
+    @Published var outside: Set<String> = []
     @Published var hidden: Set<String> = []
     @Published var names: [String: String] = [:]
     @Published var state: BarState = .expanded
@@ -37,7 +38,7 @@ final class PopoverModel: ObservableObject {
     var quit: (() -> Void)?
 
     var rows: [PopoverRow] {
-        PopoverRows.build(scanned: apps, hidden: hidden, names: names, running: running)
+        PopoverRows.build(scanned: apps, hidden: hidden, names: names, running: running, outside: outside)
     }
 
     var footerVisible: Bool {
@@ -68,7 +69,8 @@ final class PopoverModel: ObservableObject {
         }
         if trusted {
             for row in rows {
-                widest = max(widest, measure(row.name, 13) + (row.isRunning ? 0 : 4 + measure("not running", 10)))
+                let trailing = row.outsideApplications ? PopoverText.outsideTrailing : (row.isRunning ? nil : "not running")
+                widest = max(widest, measure(row.name, 13) + (trailing.map { 4 + measure($0, 10) } ?? 0))
             }
         }
         return PopoverLayout.width(widestText: widest)
@@ -211,10 +213,15 @@ struct PopoverView: View {
             Divider().padding(.vertical, 5)
             actionRow(.quit, PopoverModel.actionTitles[2], checked: false)
             if model.footerVisible {
-                Text("The Focus icon is also hidden (macOS\u{00A0}27 limit).")
-                    .font(.system(size: 11)).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, edge).padding(.top, 6).padding(.bottom, 9)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("The Focus icon is also hidden (macOS\u{00A0}27 limit).")
+                    if PopoverRows.outsideNoteVisible(rows: model.rows, hidden: model.hidden) {
+                        Text(PopoverText.outsideNote)
+                    }
+                }
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, edge).padding(.top, 6).padding(.bottom, 9)
             } else {
                 Spacer().frame(height: 6)
             }
@@ -268,6 +275,10 @@ struct PopoverView: View {
                     Text("not running").font(.system(size: 10))
                         .foregroundStyle(selected ? .white : .secondary)
                         .fixedSize()
+                } else if row.outsideApplications {
+                    Text(PopoverText.outsideTrailing).font(.system(size: 10))
+                        .foregroundStyle(selected ? .white : .secondary)
+                        .fixedSize()
                 }
             }
             .font(.system(size: 13))
@@ -280,7 +291,8 @@ struct PopoverView: View {
         .focusable(false)
         .onContinuousHover { phase in model.pointer(phase, over: row.bundleID) }
         .accessibilityRepresentation {
-            Toggle(row.isRunning ? row.name : "\(row.name), not running", isOn: Binding(
+            Toggle(row.outsideApplications ? "\(row.name), \(PopoverText.outsideTrailing)"
+                   : (row.isRunning ? row.name : "\(row.name), not running"), isOn: Binding(
                 get: { model.hidden.contains(row.bundleID) },
                 set: { _ in model.toggleApp?(row.bundleID) }
             ))

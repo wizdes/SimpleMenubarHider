@@ -40,6 +40,9 @@ WIDE_BID="dev.yili.smh.fixture.wide"
 ONE_APP="/Applications/FixtureOne.app"
 MANY_APP="/Applications/FixtureMany.app"
 WIDE_APP="/Applications/FixtureWide.app"
+HOME_WIDE_APP="$HOME/Applications/FixtureWide.app"
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+HOME_WIDE_TOUCHED=0
 
 # Fixture icon colors (see Fixtures/*/main.m).
 MAGENTA="FF00FF" # FixtureOne: 1,0,1
@@ -190,6 +193,10 @@ cleanup() {
       kill -KILL "$(pgrep -x "$name" 2>/dev/null || true)" 2>/dev/null || true
     fi
   done
+  if [ "$HOME_WIDE_TOUCHED" -eq 1 ]; then
+    if [ -e "$HOME_WIDE_APP" ]; then rm -rf "$HOME_WIDE_APP"; fi
+    "$LSREGISTER" -u "$HOME_WIDE_APP" >>"$RESULTS_FILE" 2>&1 || log "WARNING: could not unregister $HOME_WIDE_APP"
+  fi
   # SMH must be gone before the import, or it can write over the settings.
   if [ -n "$(smh_pids)" ]; then
     log "WARNING: SMH is still running; not restoring $PREFS_DOMAIN settings (the saved copy is $PREFS_BACKUP)"
@@ -205,7 +212,7 @@ step_a() {
   local t0 dt problems=0
   t0=$(now_ms)
 
-  for tool in open osascript pgrep python3 PlistBuddy dirname date defaults; do
+  for tool in open osascript pgrep python3 PlistBuddy dirname date defaults cp mkdir rm; do
     if ! command -v "$tool" >/dev/null 2>&1 && [ ! -x "/usr/libexec/$tool" ]; then
       log "MISSING tool: $tool"
       problems=$((problems + 1))
@@ -232,6 +239,7 @@ step_a() {
   if [ ! -d "$ONE_APP" ]; then log "MISSING $ONE_APP"; problems=$((problems + 1)); fi
   if [ ! -d "$MANY_APP" ]; then log "MISSING $MANY_APP"; problems=$((problems + 1)); fi
   if [ ! -d "$WIDE_APP" ]; then log "MISSING $WIDE_APP"; problems=$((problems + 1)); fi
+  if [ ! -x "$LSREGISTER" ]; then log "MISSING $LSREGISTER"; problems=$((problems + 1)); fi
 
   if [ ! -x "$PROBE" ] || [ ! -x "$SMHCTL" ]; then
     log "building Tools/..."
@@ -528,6 +536,99 @@ step_j() {
   else check_fail "j KILL restores icons" "$dt" "magenta not VISIBLE after KILL"; fi
 }
 
+# ---------------------------------------------------------------- step o ---
+step_o() {
+  local t0 dt ok=1 reply="" rc=0 i detail="" copied=0
+  t0=$(now_ms)
+  # Step j killed SMH, so start it again before checking the outside copy.
+  if [ -z "$(smh_pids)" ]; then
+    rc=0
+    open -g -b "$SMH_BID" 2>>"$RESULTS_FILE" || rc=$?
+    if [ "$rc" -eq 0 ]; then
+      reply="$(wait_smh_answers 10 2>>"$RESULTS_FILE")" || rc=$?
+    fi
+    if [ "$rc" -ne 0 ]; then
+      check_fail "o outside /Applications is hidden and reported" "$(( $(now_ms) - t0 ))" "SMH did not restart (rc $rc)"
+      return 0
+    fi
+  fi
+  if [ -z "$(smh_pids)" ] || ! pgrep -x FixtureWide >/dev/null 2>&1 || [ ! -d "$WIDE_APP" ]; then
+    check_fail "o outside /Applications is hidden and reported" "$(( $(now_ms) - t0 ))" "SMH or FixtureWide is not running from /Applications"
+    return 0
+  fi
+  reply="$("$SMHCTL" setHidden "$MANY_BID" --timeout-ms 5000 2>>"$RESULTS_FILE")" || rc=$?
+  if [ "$rc" -ne 0 ] || [ "$(smh_field "$reply" hidden || true)" != "$MANY_BID" ]; then
+    check_fail "o outside /Applications is hidden and reported" "$(( $(now_ms) - t0 ))" "could not set FixtureMany only: reply=[$reply] rc=$rc"
+    return 0
+  fi
+  rc=0
+  "$PROBE" wait --color "$BLUE" --want visible --timeout-ms 5000 >>"$RESULTS_FILE" 2>&1 || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    check_fail "o outside /Applications is hidden and reported" "$(( $(now_ms) - t0 ))" "BLUE was not visible before the copy (probe rc $rc)"
+    return 0
+  fi
+
+  HOME_WIDE_TOUCHED=1
+  quit_bid "$WIDE_BID"
+  if ! wait_gone exact FixtureWide 5; then ok=0; detail="FixtureWide did not quit"; fi
+  if [ "$ok" -eq 1 ]; then
+    if ! mkdir -p "$HOME/Applications" || ! rm -rf "$HOME_WIDE_APP" || ! cp -R "$WIDE_APP" "$HOME_WIDE_APP"; then
+      ok=0; detail="could not copy FixtureWide"
+    else
+      copied=1
+    fi
+  fi
+  if [ "$ok" -eq 1 ] && ! open -g "$HOME_WIDE_APP" 2>>"$RESULTS_FILE"; then
+    ok=0; detail="could not launch the outside copy"
+  fi
+  if [ "$ok" -eq 1 ]; then
+    for i in {1..10}; do
+      rc=0
+      reply="$("$SMHCTL" state --timeout-ms 1000 2>>"$RESULTS_FILE")" || rc=$?
+      if [ "$rc" -eq 0 ] && [ "$(smh_field "$reply" outside || true)" = "$WIDE_BID" ]; then break; fi
+      if [ "$i" -lt 10 ]; then sleep 0.5; fi
+    done
+    if [ "$rc" -ne 0 ] || [ "$(smh_field "$reply" outside || true)" != "$WIDE_BID" ] ||
+       [ "$(smh_field "$reply" hidden || true)" != "$MANY_BID" ]; then
+      ok=0; detail="outside or hidden reply was wrong: [$reply] rc=$rc"
+    fi
+  fi
+  if [ "$ok" -eq 1 ]; then
+    rc=0
+    "$PROBE" wait --color "$BLUE" --want hidden --timeout-ms 5000 >>"$RESULTS_FILE" 2>&1 || rc=$?
+    if [ "$rc" -ne 0 ]; then ok=0; detail="BLUE was not hidden (probe rc $rc)"; fi
+  fi
+
+  if [ "$copied" -eq 1 ]; then
+    quit_bid "$WIDE_BID"
+    if ! wait_gone exact FixtureWide 5; then ok=0; detail="outside FixtureWide did not quit"; fi
+    if ! rm -rf "$HOME_WIDE_APP"; then ok=0; detail="could not remove outside copy"; fi
+    if ! "$LSREGISTER" -u "$HOME_WIDE_APP" >>"$RESULTS_FILE" 2>&1; then
+      ok=0; detail="could not unregister outside copy"
+    fi
+    if ! open -g "$WIDE_APP" 2>>"$RESULTS_FILE"; then ok=0; detail="could not relaunch FixtureWide in /Applications"; fi
+    if [ "$ok" -eq 1 ]; then
+      for i in {1..10}; do
+        rc=0
+        reply="$("$SMHCTL" state --timeout-ms 1000 2>>"$RESULTS_FILE")" || rc=$?
+        if [ "$rc" -eq 0 ] && [ -z "$(smh_field "$reply" outside || true)" ]; then break; fi
+        if [ "$i" -lt 10 ]; then sleep 0.5; fi
+      done
+      if [ "$rc" -ne 0 ] || [ -n "$(smh_field "$reply" outside || true)" ]; then
+        ok=0; detail="outside did not clear: [$reply] rc=$rc"
+      fi
+    fi
+    if [ "$ok" -eq 1 ]; then
+      rc=0
+      "$PROBE" wait --color "$BLUE" --want visible --timeout-ms 5000 >>"$RESULTS_FILE" 2>&1 || rc=$?
+      if [ "$rc" -ne 0 ]; then ok=0; detail="BLUE was not visible again (probe rc $rc)"; fi
+    fi
+  fi
+  dt=$(( $(now_ms) - t0 ))
+  if [ "$ok" -eq 1 ]; then check_pass "o outside /Applications is hidden and reported" "$dt";
+  else check_fail "o outside /Applications is hidden and reported" "$dt" "$detail"; fi
+}
+
 # ---------------------------------------------------------------- step k ---
 step_k() {
   local t0 dt ok=1 reply="" state=""
@@ -595,6 +696,7 @@ main() {
   step_h
   step_i
   step_j
+  step_o
   step_k
   if [ "$FAILED" -eq 0 ]; then
     log "E2E PASS $TOTAL/$TOTAL"

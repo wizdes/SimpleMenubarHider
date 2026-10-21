@@ -128,7 +128,7 @@ Check these in order:
 - Hiding has been tested on macOS 27 only. Later macOS releases may change the private API.
 - The Focus icon is also hidden while hiding is on (macOS 27 limit).
 - Icons from programs without a bundle id also hide while hiding is on.
-- Icons from apps run outside `/Applications` also hide while hiding is on.
+- Icons from apps run outside `/Applications` also hide while hiding is on, even when you did not tick them. macOS honors SMH's list only for apps in `/Applications`. The popover marks such apps "outside /Applications". Move the app to `/Applications`; an Xcode build or an app opened from a disk image runs from elsewhere.
 - SMH pauses hiding while Thaw, Ice, Bartender or Hidden Bar runs.
 - SMH uses a private Apple API. A macOS update can break it. If that happens, SMH hides nothing and shows a warning.
 
