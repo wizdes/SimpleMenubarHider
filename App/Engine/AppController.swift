@@ -479,7 +479,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         let ownID = Bundle.main.bundleIdentifier
         return Set(NSWorkspace.shared.runningApplications.compactMap { app in
             guard let id = app.bundleIdentifier, id != ownID,
-                  PopoverRows.isOutsideApplications(bundlePath: app.bundleURL?.path) else { return nil }
+                  PopoverRows.isOutsideApplications(bundleID: id, bundlePath: app.bundleURL?.path) else { return nil }
             return id
         })
     }

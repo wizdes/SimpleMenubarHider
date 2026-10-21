@@ -193,9 +193,11 @@ cleanup() {
       kill -KILL "$(pgrep -x "$name" 2>/dev/null || true)" 2>/dev/null || true
     fi
   done
-  if [ "$HOME_WIDE_TOUCHED" -eq 1 ]; then
-    if [ -e "$HOME_WIDE_APP" ]; then rm -rf "$HOME_WIDE_APP"; fi
+  # Only a copy this run made is removed. Unregister before deleting, so
+  # LaunchServices still finds the path.
+  if [ "$HOME_WIDE_TOUCHED" -eq 1 ] && [ -e "$HOME_WIDE_APP" ]; then
     "$LSREGISTER" -u "$HOME_WIDE_APP" >>"$RESULTS_FILE" 2>&1 || log "WARNING: could not unregister $HOME_WIDE_APP"
+    rm -rf "$HOME_WIDE_APP"
   fi
   # SMH must be gone before the import, or it can write over the settings.
   if [ -n "$(smh_pids)" ]; then
@@ -536,6 +538,19 @@ step_j() {
   else check_fail "j KILL restores icons" "$dt" "magenta not VISIBLE after KILL"; fi
 }
 
+# outside_lists <reply-line> <bundle id>: true when the reply's comma-separated
+# `outside` field names the bundle id. Other third-party apps that run from
+# outside /Applications on this Mac may be listed too, so the step never
+# compares the whole field.
+outside_lists() {
+  local field
+  field="$(smh_field "$1" outside || true)"
+  case ",$field," in
+    *",$2,"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # ---------------------------------------------------------------- step o ---
 step_o() {
   local t0 dt ok=1 reply="" rc=0 i detail="" copied=0
@@ -568,14 +583,19 @@ step_o() {
     return 0
   fi
 
-  HOME_WIDE_TOUCHED=1
+  # Never remove a copy this run did not make.
+  if [ -e "$HOME_WIDE_APP" ]; then
+    check_fail "o outside /Applications is hidden and reported" "$(( $(now_ms) - t0 ))" "$HOME_WIDE_APP already exists; remove it first"
+    return 0
+  fi
   quit_bid "$WIDE_BID"
   if ! wait_gone exact FixtureWide 5; then ok=0; detail="FixtureWide did not quit"; fi
   if [ "$ok" -eq 1 ]; then
-    if ! mkdir -p "$HOME/Applications" || ! rm -rf "$HOME_WIDE_APP" || ! cp -R "$WIDE_APP" "$HOME_WIDE_APP"; then
+    if ! mkdir -p "$HOME/Applications" || ! cp -R "$WIDE_APP" "$HOME_WIDE_APP"; then
       ok=0; detail="could not copy FixtureWide"
     else
       copied=1
+      HOME_WIDE_TOUCHED=1
     fi
   fi
   if [ "$ok" -eq 1 ] && ! open -g "$HOME_WIDE_APP" 2>>"$RESULTS_FILE"; then
@@ -585,10 +605,10 @@ step_o() {
     for i in {1..10}; do
       rc=0
       reply="$("$SMHCTL" state --timeout-ms 1000 2>>"$RESULTS_FILE")" || rc=$?
-      if [ "$rc" -eq 0 ] && [ "$(smh_field "$reply" outside || true)" = "$WIDE_BID" ]; then break; fi
+      if [ "$rc" -eq 0 ] && outside_lists "$reply" "$WIDE_BID"; then break; fi
       if [ "$i" -lt 10 ]; then sleep 0.5; fi
     done
-    if [ "$rc" -ne 0 ] || [ "$(smh_field "$reply" outside || true)" != "$WIDE_BID" ] ||
+    if [ "$rc" -ne 0 ] || ! outside_lists "$reply" "$WIDE_BID" ||
        [ "$(smh_field "$reply" hidden || true)" != "$MANY_BID" ]; then
       ok=0; detail="outside or hidden reply was wrong: [$reply] rc=$rc"
     fi
@@ -602,19 +622,20 @@ step_o() {
   if [ "$copied" -eq 1 ]; then
     quit_bid "$WIDE_BID"
     if ! wait_gone exact FixtureWide 5; then ok=0; detail="outside FixtureWide did not quit"; fi
-    if ! rm -rf "$HOME_WIDE_APP"; then ok=0; detail="could not remove outside copy"; fi
     if ! "$LSREGISTER" -u "$HOME_WIDE_APP" >>"$RESULTS_FILE" 2>&1; then
       ok=0; detail="could not unregister outside copy"
     fi
+    if ! rm -rf "$HOME_WIDE_APP"; then ok=0; detail="could not remove outside copy"; fi
+    HOME_WIDE_TOUCHED=0
     if ! open -g "$WIDE_APP" 2>>"$RESULTS_FILE"; then ok=0; detail="could not relaunch FixtureWide in /Applications"; fi
     if [ "$ok" -eq 1 ]; then
       for i in {1..10}; do
         rc=0
         reply="$("$SMHCTL" state --timeout-ms 1000 2>>"$RESULTS_FILE")" || rc=$?
-        if [ "$rc" -eq 0 ] && [ -z "$(smh_field "$reply" outside || true)" ]; then break; fi
+        if [ "$rc" -eq 0 ] && ! outside_lists "$reply" "$WIDE_BID"; then break; fi
         if [ "$i" -lt 10 ]; then sleep 0.5; fi
       done
-      if [ "$rc" -ne 0 ] || [ -n "$(smh_field "$reply" outside || true)" ]; then
+      if [ "$rc" -ne 0 ] || outside_lists "$reply" "$WIDE_BID"; then
         ok=0; detail="outside did not clear: [$reply] rc=$rc"
       fi
     fi

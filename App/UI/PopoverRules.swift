@@ -90,11 +90,16 @@ struct PopoverRow: Equatable, Identifiable {
 }
 
 enum PopoverRows {
-    static func isOutsideApplications(bundlePath: String?) -> Bool {
-        guard let bundlePath else { return false }
-        return !bundlePath.hasPrefix("/Applications/")
+    /// True for a third-party app whose running copy is not under /Applications. MenuBarAgent honors
+    /// SMH's allow list only for copies in /Applications (measured on macOS 27.0.1). Apple's own
+    /// processes run from /System and are never marked, and an unknown path is not marked either.
+    static func isOutsideApplications(bundleID: String, bundlePath: String?) -> Bool {
+        guard let bundlePath, !bundleID.hasPrefix("com.apple.") else { return false }
+        return !bundlePath.hasPrefix("/Applications/") && !bundlePath.hasPrefix("/System/")
     }
 
+    /// The footer note shows while a running, unticked app is outside /Applications. A ticked one is
+    /// hidden on purpose, so it needs no note.
     static func outsideNoteVisible(rows: [PopoverRow], hidden: Set<String>) -> Bool {
         rows.contains { $0.isRunning && $0.outsideApplications && !hidden.contains($0.bundleID) }
     }

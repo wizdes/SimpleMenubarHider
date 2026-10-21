@@ -115,12 +115,15 @@ struct PopoverRulesTests {
     }
 
     static func outsideApplicationsRules() {
-        expect(PopoverRows.isOutsideApplications(bundlePath: nil), false, "a missing path is unknown")
-        expect(PopoverRows.isOutsideApplications(bundlePath: "/Applications/X.app"), false, "app in Applications")
-        expect(PopoverRows.isOutsideApplications(bundlePath: "/Applications/Sub/X.app"), false, "app in an Applications subfolder")
-        expect(PopoverRows.isOutsideApplications(bundlePath: "/Users/yili/Applications/X.app"), true, "app in a home Applications folder")
-        expect(PopoverRows.isOutsideApplications(bundlePath: "/ApplicationsOther/X.app"), true, "a similar prefix is outside")
-        expect(PopoverRows.isOutsideApplications(bundlePath: "/Volumes/CatPad/CatPad.app"), true, "app on a disk image")
+        let x = "com.example.x"
+        expect(PopoverRows.isOutsideApplications(bundleID: x, bundlePath: nil), false, "a missing path is unknown")
+        expect(PopoverRows.isOutsideApplications(bundleID: x, bundlePath: "/Applications/X.app"), false, "app in Applications")
+        expect(PopoverRows.isOutsideApplications(bundleID: x, bundlePath: "/Applications/Sub/X.app"), false, "app in an Applications subfolder")
+        expect(PopoverRows.isOutsideApplications(bundleID: x, bundlePath: "/Users/yili/Applications/X.app"), true, "app in a home Applications folder")
+        expect(PopoverRows.isOutsideApplications(bundleID: x, bundlePath: "/ApplicationsOther/X.app"), true, "a similar prefix is outside")
+        expect(PopoverRows.isOutsideApplications(bundleID: x, bundlePath: "/Volumes/CatPad/CatPad.app"), true, "app on a disk image")
+        expect(PopoverRows.isOutsideApplications(bundleID: x, bundlePath: "/System/Applications/X.app"), false, "an app under /System is Apple's")
+        expect(PopoverRows.isOutsideApplications(bundleID: "com.apple.Safari", bundlePath: "/Users/yili/Applications/Safari.app"), false, "an Apple bundle id is never marked")
 
         let scanned = [MenuBarApp(bundleID: "running", name: "Running"),
                        MenuBarApp(bundleID: "stopped", name: "Stopped")]

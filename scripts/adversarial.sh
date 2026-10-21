@@ -102,7 +102,7 @@ ALL_FIXTURE_IDS="$ONE_BID,$MANY_BID,$WIDE_BID,$FLICKER_BID,$COMPETITOR_BID"
 
 # Every key smhctl can print. smh_field uses this list to find where one
 # value ends, because some values (state, settingsNote) contain spaces.
-REPLY_KEYS="allowCount applied applyCount conflict found hidden popover settingsNote state trusted"
+REPLY_KEYS="allowCount applied applyCount conflict found hidden outside popover settingsNote state trusted"
 
 TOTAL=0
 FAILED=0
