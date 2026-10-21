@@ -141,7 +141,7 @@ struct PopoverRulesTests {
         expect(PopoverRows.outsideNoteVisible(rows: stoppedOutside, hidden: []), false, "an outside app that stopped hides the note")
         expect(PopoverText.outsideTrailing, "outside /Applications", "outside row text")
         expect(PopoverText.outsideNote,
-               "Apps outside /Applications are hidden too (macOS\u{00A0}27 limit). Move them to /Applications.",
+               "Apps outside /\u{2060}Applications are hidden too (macOS\u{00A0}27 limit). Move them to /\u{2060}Applications.",
                "outside footer text")
     }
 

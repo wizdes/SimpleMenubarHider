@@ -259,7 +259,7 @@ struct SizeUpdateThrottle: Equatable {
 
 enum PopoverText {
     static let outsideTrailing = "outside /Applications"
-    static let outsideNote = "Apps outside /Applications are hidden too (macOS\u{00A0}27 limit). Move them to /Applications."
+    static let outsideNote = "Apps outside /\u{2060}Applications are hidden too (macOS\u{00A0}27 limit). Move them to /\u{2060}Applications."
 
     static func conflict(name: String) -> String {
         "\(name) is also hiding menu bar icons, so SMH has paused. Quit \(name) to use SMH."

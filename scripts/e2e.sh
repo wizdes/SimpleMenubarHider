@@ -591,11 +591,12 @@ step_o() {
   quit_bid "$WIDE_BID"
   if ! wait_gone exact FixtureWide 5; then ok=0; detail="FixtureWide did not quit"; fi
   if [ "$ok" -eq 1 ]; then
+    # Owned from here on: a copy that fails halfway still gets cleaned up.
+    HOME_WIDE_TOUCHED=1
     if ! mkdir -p "$HOME/Applications" || ! cp -R "$WIDE_APP" "$HOME_WIDE_APP"; then
       ok=0; detail="could not copy FixtureWide"
     else
       copied=1
-      HOME_WIDE_TOUCHED=1
     fi
   fi
   if [ "$ok" -eq 1 ] && ! open -g "$HOME_WIDE_APP" 2>>"$RESULTS_FILE"; then
@@ -625,8 +626,8 @@ step_o() {
     if ! "$LSREGISTER" -u "$HOME_WIDE_APP" >>"$RESULTS_FILE" 2>&1; then
       ok=0; detail="could not unregister outside copy"
     fi
-    if ! rm -rf "$HOME_WIDE_APP"; then ok=0; detail="could not remove outside copy"; fi
-    HOME_WIDE_TOUCHED=0
+    # Ownership ends only once the copy is really gone; the EXIT trap retries otherwise.
+    if rm -rf "$HOME_WIDE_APP"; then HOME_WIDE_TOUCHED=0; else ok=0; detail="could not remove outside copy"; fi
     if ! open -g "$WIDE_APP" 2>>"$RESULTS_FILE"; then ok=0; detail="could not relaunch FixtureWide in /Applications"; fi
     if [ "$ok" -eq 1 ]; then
       for i in {1..10}; do
