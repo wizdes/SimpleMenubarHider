@@ -47,8 +47,8 @@ macOS 27 broke the method Bartender, Ice and Hidden Bar used to hide icons. Thaw
 
 Requirements: macOS 27 or later, on a Mac with Apple silicon. The app does not run on Intel Macs.
 
-1. Download the zip from [GitHub Releases](https://github.com/wizdes/SimpleMenubarHider/releases/latest) and unzip it.
-2. Move `Simple Menubar Hider.app` to `/Applications`. SMH will not hide icons when run from elsewhere.
+1. Download the DMG from [GitHub Releases](https://github.com/wizdes/SimpleMenubarHider/releases/latest) and open it.
+2. Drag `Simple Menubar Hider.app` onto the Applications folder shown in the window. SMH will not hide icons when run from elsewhere.
 3. Open the app. A circle icon appears in the menu bar, and the popover opens by itself the first time.
 4. In the popover, click **Open Accessibility Settings** and turn on Simple Menubar Hider. SMH needs this to list apps with menu bar icons. Hiding itself does not use Accessibility.
 5. Tick the apps whose icons you want to hide.

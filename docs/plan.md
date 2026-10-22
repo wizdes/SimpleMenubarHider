@@ -151,7 +151,7 @@ Other menu bar tools and system features:
 
 ### M5. Public release (budget: 1 day). Needs the user's OK before the first publish.
 - Sparkle 2 with an EdDSA key (stored in `~/keys`, name only in the repo), appcast on GitHub Releases.
-- Build, sign with Developer ID, notarize, staple, zip.
+- Build, sign with Developer ID, notarize, staple, DMG.
 - Public GitHub repo, README that says plainly it uses a private Apple API and can break on any update, GPL or MIT license (choice to check).
 - Homebrew cask in a personal tap (`yili/homebrew-tap`).
 - Launch check: on launch, if the shim is unavailable, show a clear message that points to the GitHub issue page.

@@ -23,7 +23,7 @@ done
 pass
 
 step='tool checks'
-for tool in git xcodegen xcodebuild codesign ditto xcrun spctl shasum rg python3 file find sort; do
+for tool in git xcodegen xcodebuild codesign ditto hdiutil xcrun spctl shasum rg python3 file find sort; do
   command -v "$tool" >/dev/null 2>&1 || fail "missing tool: $tool"
 done
 [[ -x /usr/libexec/PlistBuddy ]] || fail 'missing tool: /usr/libexec/PlistBuddy'
@@ -52,7 +52,7 @@ fi
 release_dir="$repo_root/build/release"
 derived_data="$release_dir/DerivedData"
 app="$derived_data/Build/Products/Release/Simple Menubar Hider.app"
-zip="$release_dir/SimpleMenubarHider-$version.zip"
+dmg="$release_dir/SimpleMenubarHider-$version.dmg"
 signing_identity='Developer ID Application: Yi Li (8Q5V8XK85Y)'
 
 step='clean release folder'
@@ -179,15 +179,9 @@ entitlements="$(codesign -d --entitlements - "$app" 2>&1)"
 [[ "$entitlements" != *'com.apple.security.app-sandbox'* ]] || fail 'app has a sandbox entitlement'
 pass
 
-step='create zip'
-ditto -c -k --keepParent "$app" "$zip"
-[[ -s "$zip" ]] || fail "zip missing: $zip"
-pass
-
-if "$notarize"; then
-  step='notarize zip'
-  submission=''
-  if ! submission="$(xcrun notarytool submit "$zip" --keychain-profile "$profile" --wait --output-format json)"; then
+submit_for_notarization() {
+  local artifact="$1" submission submission_id status
+  if ! submission="$(xcrun notarytool submit "$artifact" --keychain-profile "$profile" --wait --output-format json)"; then
     printf '%s\n' "$submission" >&2
     submission_id="$(printf '%s' "$submission" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("id", ""))' 2>/dev/null || true)"
     if [[ -n "$submission_id" ]]; then xcrun notarytool log "$submission_id" --keychain-profile "$profile" || true; fi
@@ -199,6 +193,18 @@ if "$notarize"; then
     if [[ -n "$submission_id" ]]; then xcrun notarytool log "$submission_id" --keychain-profile "$profile" || true; fi
     fail "notary status: ${status:-unknown}"
   fi
+}
+
+if "$notarize"; then
+  step='create temporary notary zip'
+  mkdir -p "$release_dir/notary"
+  notary_zip="$release_dir/notary/SimpleMenubarHider-$version.zip"
+  ditto -c -k --keepParent "$app" "$notary_zip"
+  [[ -s "$notary_zip" ]] || fail "zip missing: $notary_zip"
+  pass
+
+  step='notarize app'
+  submit_for_notarization "$notary_zip"
   pass
 
   step='staple app'
@@ -210,17 +216,76 @@ if "$notarize"; then
   spctl --assess --type execute -vv "$app"
   pass
 
-  step='zip stapled app'
-  ditto -c -k --keepParent "$app" "$zip"
-  [[ -s "$zip" ]] || fail "zip missing: $zip"
+  step='remove temporary notary zip'
+  rm "$notary_zip"
+  rmdir "$release_dir/notary"
   pass
 else
   printf 'PASS: notarize and staple skipped (--no-notarize)\n'
 fi
 
+step='create DMG'
+staging="$release_dir/dmg-staging"
+mkdir -p "$staging"
+ditto "$app" "$staging/Simple Menubar Hider.app"
+ln -s /Applications "$staging/Applications"
+hdiutil create -volname "Simple Menubar Hider" -srcfolder "$staging" -ov -format UDZO "$dmg"
+[[ -s "$dmg" ]] || fail "DMG missing: $dmg"
+rm -r "$staging"
+pass
+
+step='sign DMG'
+codesign --force --timestamp --sign "$signing_identity" "$dmg"
+codesign --verify --strict --verbose=2 "$dmg"
+pass
+
+if "$notarize"; then
+  step='notarize DMG'
+  submit_for_notarization "$dmg"
+  pass
+
+  step='staple DMG'
+  xcrun stapler staple "$dmg"
+  pass
+
+  step='validate stapled DMG'
+  xcrun stapler validate "$dmg"
+  spctl --assess --type open --context context:primary-signature -vv "$dmg"
+  pass
+fi
+
+verify_mounted_app() {
+  local mounted_app="$mount_dir/Simple Menubar Hider.app"
+  [[ -d "$mounted_app" ]] || { printf 'Missing app in DMG: %s\n' "$mounted_app" >&2; return 1; }
+  [[ -L "$mount_dir/Applications" && "$(readlink "$mount_dir/Applications")" == /Applications ]] || {
+    printf 'Missing Applications link in DMG\n' >&2
+    return 1
+  }
+  codesign --verify --deep --strict "$mounted_app" || return 1
+  if "$notarize"; then
+    xcrun stapler validate "$mounted_app" || return 1
+  fi
+}
+
+step='verify DMG contents'
+mount_dir="$(mktemp -d "$release_dir/dmg-mount.XXXXXX")"
+if ! hdiutil attach -nobrowse -readonly -noautoopen -mountpoint "$mount_dir" "$dmg"; then
+  fail 'could not attach DMG'
+fi
+verified=true
+if ! verify_mounted_app; then verified=false; fi
+if ! hdiutil detach "$mount_dir"; then fail 'could not detach DMG'; fi
+rmdir "$mount_dir"
+[[ "$verified" == true ]] || fail 'DMG contents failed verification'
+pass
+
+step='ZIP guard'
+[[ -z "$(find "$release_dir" -name '*.zip' -print -quit)" ]] || fail 'ZIP file remains under release folder'
+pass
+
 step='SHA-256'
-shasum -a 256 "$zip"
+shasum -a 256 "$dmg"
 pass
 printf 'Next commands (run after review):\n'
 printf '  git tag v%s\n' "$version"
-printf '  gh release create v%s %q --draft --title %q\n' "$version" "$zip" "v$version"
+printf '  gh release create v%s %q --draft --title %q\n' "$version" "$dmg" "v$version"
