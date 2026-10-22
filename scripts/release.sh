@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 step='input checks'
 trap 'result=$?; printf "FAIL: %s (exit %s)\n" "$step" "$result" >&2' ERR
@@ -269,12 +269,16 @@ verify_mounted_app() {
 
 step='verify DMG contents'
 mount_dir="$(mktemp -d "$release_dir/dmg-mount.XXXXXX")"
+detach_on_exit() { hdiutil detach -force "$mount_dir" >/dev/null 2>&1 || true; }
+trap detach_on_exit EXIT
+trap 'exit 130' INT TERM
 if ! hdiutil attach -nobrowse -readonly -noautoopen -mountpoint "$mount_dir" "$dmg"; then
   fail 'could not attach DMG'
 fi
 verified=true
 if ! verify_mounted_app; then verified=false; fi
 if ! hdiutil detach "$mount_dir"; then fail 'could not detach DMG'; fi
+trap - EXIT INT TERM
 rmdir "$mount_dir"
 [[ "$verified" == true ]] || fail 'DMG contents failed verification'
 pass
