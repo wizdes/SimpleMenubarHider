@@ -41,13 +41,14 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
     func render(state: BarState, hiddenCount: Int, paused: Bool) {
         let symbol: String
+        let pointSize: CGFloat
         switch state {
-        case .collapsed: symbol = "circle.fill"
-        case .expanded, .revealing: symbol = "circle"
-        case .unavailable: symbol = "exclamationmark.triangle"
+        // An 8-point dot, close to the dots of Thaw (about 7.7 points) and Dozer (about 8.3 points).
+        case .collapsed: symbol = "circle.fill"; pointSize = 8
+        case .expanded, .revealing: symbol = "circle"; pointSize = 8
+        case .unavailable: symbol = "exclamationmark.triangle"; pointSize = 11
         }
-        // A little smaller than the default symbol size, so the circle sits level with the icons next to it.
-        let size = NSImage.SymbolConfiguration(pointSize: 11, weight: .regular)
+        let size = NSImage.SymbolConfiguration(pointSize: pointSize, weight: .regular)
         let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Simple Menubar Hider")?
             .withSymbolConfiguration(size)
         image?.isTemplate = true
